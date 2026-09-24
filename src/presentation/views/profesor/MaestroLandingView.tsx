@@ -21,6 +21,7 @@ import { LogoUV } from '@/presentation/components/LogoUV';
 import { ConfirmDialog } from '@/presentation/components/ConfirmDialog';
 import { TrabajoModalForm } from './TrabajoModalForm';
 import { RecepcionDocumentosModal } from '../secretaria/RecepcionDocumentosModal';
+import { FinalizarTrabajoModal } from '../secretaria/FinalizarTrabajoModal';
 import type { TrabajoRecepcional } from '@/domain/models/trabajo.types';
 import { resolveRoleName, canFinalizarTrabajo } from '@/utils/roleUtils';
 
@@ -416,14 +417,14 @@ export const MaestroLandingView: React.FC = () => {
                               <button
                                 onClick={() => handleEditar(trabajo)}
                                 className="w-16 py-0.5 rounded bg-[#f39c12] hover:bg-[#d68910] active:scale-95 text-white font-bold text-[10px] shadow-2xs transition-all cursor-pointer"
-                                title="Editar trabajo recepcional (CU-05)"
+                                title="Editar trabajo recepcional"
                               >
                                 Editar
                               </button>
                               <button
                                 onClick={() => handleAceptar(trabajo)}
                                 className="w-16 py-0.5 rounded bg-[#00873e] hover:bg-[#007033] active:scale-95 text-white font-bold text-[10px] shadow-2xs transition-all flex items-center justify-center gap-0.5 cursor-pointer"
-                                title="Aceptar y aprobar trabajo recepcional (CU-03)"
+                                title="Aceptar y aprobar trabajo recepcional"
                               >
                                 <Check className="w-2.5 h-2.5 stroke-[3]" />
                                 <span>Aceptar</span>
@@ -431,7 +432,7 @@ export const MaestroLandingView: React.FC = () => {
                               <button
                                 onClick={() => handleRechazar(trabajo)}
                                 className="w-16 py-0.5 rounded bg-[#e74c3c] hover:bg-[#c0392b] active:scale-95 text-white font-bold text-[10px] shadow-2xs transition-all flex items-center justify-center gap-0.5 cursor-pointer"
-                                title="Rechazar y regresar a borrador (CU-04)"
+                                title="Rechazar y regresar a borrador"
                               >
                                 <X className="w-2.5 h-2.5 stroke-[3]" />
                                 <span>Rechazar</span>
@@ -445,11 +446,11 @@ export const MaestroLandingView: React.FC = () => {
                         ) : estadoNombre === 'Aprobado' ? (
                           isSecretariaGrupoUser || userIsDirectivo ? (
                             <div className="flex flex-col items-center gap-1 w-full">
-                              {/* Botón Documentación (CU-06) */}
+                              {/* Botón Documentación */}
                               <button
                                 onClick={() => handleAbrirDocumentos(trabajo)}
                                 className="w-22 py-0.5 rounded bg-[#003882] hover:bg-[#00275c] active:scale-95 text-white font-bold text-[10px] shadow-2xs transition-all flex items-center justify-center gap-1 cursor-pointer"
-                                title="Ver y llenar recepción de documentos (CU-06)"
+                                title="Control documental de recepción de requisitos"
                               >
                                 <Files className="w-2.5 h-2.5" />
                                 <span>Documentación</span>
@@ -460,7 +461,7 @@ export const MaestroLandingView: React.FC = () => {
                                 <button
                                   onClick={() => handleGenerarActa(trabajo)}
                                   className="w-22 py-0.5 rounded bg-[#00873e] hover:bg-[#007033] active:scale-95 text-white font-bold text-[10px] shadow-2xs transition-all flex items-center justify-center gap-1 cursor-pointer animate-fadeIn"
-                                  title="Generar acta oficial de trabajo recepcional (CU-06)"
+                                  title="Generar acta oficial de trabajo recepcional"
                                 >
                                   <ScrollText className="w-2.5 h-2.5 stroke-[2.5]" />
                                   <span>Generar acta</span>
@@ -470,7 +471,7 @@ export const MaestroLandingView: React.FC = () => {
                               <button
                                 onClick={() => handleEditar(trabajo)}
                                 className="w-22 py-0.5 rounded bg-[#f39c12] hover:bg-[#d68910] active:scale-95 text-white font-bold text-[10px] shadow-2xs transition-all cursor-pointer"
-                                title="Editar trabajo recepcional (CU-05)"
+                                title="Editar trabajo recepcional"
                               >
                                 Editar
                               </button>
@@ -506,7 +507,7 @@ export const MaestroLandingView: React.FC = () => {
                             <button
                               onClick={() => handleEditar(trabajo)}
                               className="w-16 py-0.5 rounded bg-[#f39c12] hover:bg-[#d68910] active:scale-95 text-white font-bold text-[10px] shadow-2xs transition-all cursor-pointer"
-                              title="Editar trabajo recepcional (CU-05)"
+                              title="Editar trabajo recepcional"
                             >
                               Editar
                             </button>
@@ -546,14 +547,11 @@ export const MaestroLandingView: React.FC = () => {
       />
 
       {/* Modal Form for Finalizar Trabajo Recepcional */}
-      <TrabajoModalForm
+      <FinalizarTrabajoModal
         isOpen={isFinalizarModalOpen}
         onClose={handleCerrarFinalizar}
-        onSave={async () => {}}
+        trabajo={trabajoParaFinalizar}
         onFinalizar={handleFinalizarSubmit}
-        isFinalizarMode={true}
-        trabajoToEdit={trabajoParaFinalizar}
-        existingTrabajos={rawTrabajos}
         isLoading={isFinalizando}
       />
 

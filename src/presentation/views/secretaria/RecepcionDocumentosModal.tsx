@@ -184,7 +184,7 @@ export const RecepcionDocumentosModal: React.FC<RecepcionDocumentosModalProps> =
                 Recepción de documentos
               </h2>
               <p className="text-xs text-slate-600">
-                Experiencia Recepcional &bull; Control de requisitos para Generación de Acta (CU-06)
+                Experiencia Recepcional &bull; Control de requisitos para Generación de Acta Oficial
               </p>
             </div>
           </div>

@@ -354,7 +354,7 @@ export const useMaestroLandingController = () => {
   const handleGenerarActa = (trabajo: TrabajoRecepcional) => {
     setConfirmDialog({
       isOpen: true,
-      title: 'Generar Acta de Trabajo Recepcional (CU-06)',
+      title: 'Generar Acta Oficial de Trabajo Recepcional',
       message: `¿Confirma que el trabajo recepcional "${trabajo.Titulo}" ya cuenta con su acta generada? El estado cambiará a "Generado".`,
       confirmText: 'Generar Acta',
       cancelText: 'Cancelar',
