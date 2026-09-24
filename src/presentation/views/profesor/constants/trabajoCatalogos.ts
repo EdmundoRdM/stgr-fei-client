@@ -3,6 +3,7 @@ export const CARRERAS_OPCIONES = [
   { id: 2, nombre: 'Ciencia de Datos' },
   { id: 3, nombre: 'Redes y Servicios de Cómputo' },
   { id: 4, nombre: 'Tecnologías de la Información' },
+  { id: 5, nombre: 'Estadística' },
 ];
 
 export const MODALIDADES_OPCIONES = [

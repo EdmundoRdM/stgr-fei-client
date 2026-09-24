@@ -73,6 +73,8 @@ export const MaestroLandingView: React.FC = () => {
     handleCloseConfirmDialog,
     userIsDirectivo,
     isSecretariaGrupoUser,
+    isJefeCarreraUser,
+    jefeCarreraNombre,
     userNumeroPersonal,
   } = useMaestroLandingController();
 
@@ -100,7 +102,11 @@ export const MaestroLandingView: React.FC = () => {
           <div className="flex items-center gap-4">
             <div className="hidden sm:flex flex-col text-right text-white">
               <span className="text-sm font-bold leading-tight">{user?.nombre || 'Docente'}</span>
-              <span className="text-xs text-emerald-100 font-semibold">{resolveRoleName(user)}</span>
+              <span className="text-xs text-emerald-100 font-semibold">
+                {isJefeCarreraUser && jefeCarreraNombre
+                  ? `Jefe de Carrera • ${jefeCarreraNombre}`
+                  : resolveRoleName(user)}
+              </span>
             </div>
 
             <button
@@ -122,7 +128,9 @@ export const MaestroLandingView: React.FC = () => {
             Sistema de gestión de trabajos recepcionales
           </h1>
           <p className="text-xs sm:text-sm font-semibold text-slate-600">
-            Experiencia Recepcional - Sección 1
+            {isJefeCarreraUser && jefeCarreraNombre
+              ? `Licenciatura en ${jefeCarreraNombre} — Supervisión Académica`
+              : 'Experiencia Recepcional - Sección 1'}
           </p>
         </div>
 
@@ -168,14 +176,14 @@ export const MaestroLandingView: React.FC = () => {
             {/* Table Header matching prototype exactly */}
             <thead>
               <tr className="bg-[#b8bcc4] text-slate-900 font-bold border-b border-white select-none">
-                {/* Folio del Acta (Compacto y Ordenable) */}
+                {/* Tomo y Folio del Acta (Compacto y Ordenable) */}
                 <th
                   onClick={() => handleSort('folio')}
-                  className="w-16 min-w-[65px] max-w-[75px] py-2 px-1 text-center border-r border-white hover:bg-[#a8acb4] transition-colors cursor-pointer whitespace-nowrap"
-                  title="Clic para ordenar por folio"
+                  className="w-20 min-w-[75px] max-w-[90px] py-2 px-1 text-center border-r border-white hover:bg-[#a8acb4] transition-colors cursor-pointer whitespace-nowrap"
+                  title="Clic para ordenar por tomo y folio del acta"
                 >
                   <div className="inline-flex items-center justify-center">
-                    <span className="text-[11px]">Folio del Acta</span>
+                    <span className="text-[11px]">Tomo / Folio</span>
                     {renderSortIndicator('folio')}
                   </div>
                 </th>
@@ -295,9 +303,24 @@ export const MaestroLandingView: React.FC = () => {
                         isEven ? 'bg-[#eaedf2]' : 'bg-[#e2e5ea]'
                       }`}
                     >
-                      {/* Folio (Compacto) */}
-                      <td className="w-16 min-w-[65px] max-w-[75px] py-2 px-1 text-center border-r border-white font-medium text-slate-700 text-[11px] whitespace-nowrap">
-                        {trabajo.Folio || 'Pendiente'}
+                      {/* Tomo y Folio del Acta */}
+                      <td className="w-20 min-w-[75px] max-w-[90px] py-2 px-1 text-center border-r border-white font-medium text-slate-700 text-[11px] whitespace-nowrap">
+                        {trabajo.Tomo && trabajo.Numero_Folio ? (
+                          <div className="flex flex-col items-center justify-center leading-tight">
+                            <span className="font-bold text-slate-800 text-[10.5px] bg-slate-200/80 px-1.5 py-0.5 rounded border border-slate-300">
+                              Tomo {trabajo.Tomo}
+                            </span>
+                            <span className="text-[10px] font-bold text-emerald-800 mt-0.5">
+                              Folio {trabajo.Numero_Folio}
+                            </span>
+                          </div>
+                        ) : trabajo.Folio && trabajo.Folio !== 'Pendiente' ? (
+                          <span className="font-semibold text-slate-700 text-[11px]">
+                            {trabajo.Folio}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400 italic text-[10.5px]">Pendiente</span>
+                        )}
                       </td>
 
                       {/* Licenciatura */}

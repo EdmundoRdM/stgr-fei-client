@@ -65,7 +65,14 @@ export const TrabajoModalForm: React.FC<TrabajoModalFormProps> = ({
               <DatosGeneralesFormSection
                 folio={form.folio}
                 setFolio={form.setFolio}
+                tomo={form.tomo}
+                setTomo={form.setTomo}
+                numeroFolio={form.numeroFolio}
+                setNumeroFolio={form.setNumeroFolio}
+                handleTomoChange={form.handleTomoChange}
+                handleNumeroFolioChange={form.handleNumeroFolioChange}
                 isFolioResultadoLocked={form.isFolioResultadoLocked}
+                isJefeCarrera={form.isJefeCarrera}
                 carreraId={form.carreraId}
                 setCarreraId={form.setCarreraId}
                 fechaHora={form.fechaHora}
@@ -89,6 +96,9 @@ export const TrabajoModalForm: React.FC<TrabajoModalFormProps> = ({
                 onRemoveEstudiante={form.handleRemoveEstudiante}
                 onEstudianteChange={form.handleEstudianteChange}
                 error={form.errors.estudiantes}
+                sinGruposPeriodoActual={form.sinGruposPeriodoActual}
+                infoGrupos={form.infoGrupos}
+                isLoadingGrupos={form.isLoadingGrupos}
               />
             </div>
 
@@ -115,7 +125,7 @@ export const TrabajoModalForm: React.FC<TrabajoModalFormProps> = ({
           <div className="pt-4 flex items-center justify-center gap-4 border-t border-slate-300 shrink-0">
             <button
               type="submit"
-              disabled={isLoading || !!form.lugarConflictivo}
+              disabled={isLoading || !!form.lugarConflictivo || form.sinGruposPeriodoActual}
               className="px-8 py-3 rounded-xl bg-[#00873e] hover:bg-[#007033] active:scale-[0.98] text-white font-bold text-sm sm:text-base shadow-md transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isLoading

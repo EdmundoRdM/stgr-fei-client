@@ -3,9 +3,12 @@ import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { academicoService } from '@/services/academicos/academicoService';
 import { estudianteService } from '@/services/estudiantes/estudianteService';
+import { trabajoService, type GuardarTrabajoPayload } from '@/services/trabajos/trabajoService';
+import { cursoService } from '@/services/cursos/cursoService';
+import { useAuth } from '@/context/AuthContext';
+import { isDirectivo, isJefeCarrera, getUserCarreraId } from '@/utils/roleUtils';
 import type { SelectOption } from '@/presentation/components/SearchableSelect';
 import type { TrabajoRecepcional } from '@/domain/models/trabajo.types';
-import type { GuardarTrabajoPayload } from '@/services/trabajos/trabajoService';
 
 // Helper para formatear cualquier fecha proveniente de la API al formato estricto de datetime-local (YYYY-MM-DDTHH:mm)
 export const formatToDateTimeLocal = (fechaRaw?: string | null): string => {
@@ -65,6 +68,80 @@ export const detectarContenidoMalicioso = (texto: string): string | null => {
   return null;
 };
 
+// Normalizador de texto para comparaciones insensibles a mayúsculas y acentos
+const normalizeText = (text: string): string =>
+  text
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+
+// Helper robusto para encontrar el Número de Personal de un participante según su rol
+const findNumeroPersonalByRol = (
+  participantes: any[],
+  rolId: number,
+  nombreRol: string
+): string | undefined => {
+  const targetNorm = normalizeText(nombreRol);
+  const part = participantes.find((p: any) => {
+    // 1. Coincidencia por ID numérico en múltiples variantes de nomenclatura
+    const pRolId = Number(
+      p.Id_rol ??
+        p.Id_Rol ??
+        p.id_rol ??
+        p.idRol ??
+        p.RolDeParticipacion?.Id_rol ??
+        p.RolDeParticipacion?.Id_Rol ??
+        p.Rol_de_participacion?.Id_rol ??
+        p.Rol_de_participacion?.Id_Rol ??
+        p.Rol?.Id_Rol ??
+        p.Rol?.Id_rol
+    );
+    if (!isNaN(pRolId) && pRolId === rolId) {
+      return true;
+    }
+
+    // 2. Coincidencia por nombre de rol
+    const pNombre = normalizeText(
+      p.RolDeParticipacion?.NombreRol ??
+        p.Rol_de_participacion?.NombreRol ??
+        p.Rol?.NombreRol ??
+        p.NombreRol ??
+        p.nombreRol ??
+        ''
+    );
+
+    if (!pNombre) return false;
+
+    // Distinción clara entre Director y Codirector
+    if (targetNorm === 'director') {
+      return pNombre === 'director' || (pNombre.includes('director') && !pNombre.includes('co'));
+    }
+    if (targetNorm === 'codirector') {
+      return (
+        pNombre.includes('codirector') ||
+        pNombre.includes('co-director') ||
+        pNombre.includes('co director')
+      );
+    }
+
+    return pNombre.includes(targetNorm);
+  });
+
+  if (!part) return undefined;
+
+  const numPersonal =
+    part.Numero_Personal ??
+    part.numeroPersonal ??
+    part.NumeroPersonal ??
+    part.Academico?.Numero_Personal ??
+    part.Academico?.numeroPersonal ??
+    part.academico?.Numero_Personal ??
+    part.academico?.numeroPersonal;
+
+  return numPersonal !== undefined && numPersonal !== null ? String(numPersonal) : undefined;
+};
+
 interface UseTrabajoFormParams {
   isOpen: boolean;
   onClose: () => void;
@@ -80,13 +157,21 @@ export const useTrabajoForm = ({
   trabajoToEdit,
   existingTrabajos = [],
 }: UseTrabajoFormParams) => {
+  const { user } = useAuth();
+  const esDirectivo = isDirectivo(user);
+  const esJefeCarrera = isJefeCarrera(user);
+  const userCarreraId = getUserCarreraId(user);
+  const esProfesorRegistrando = !esDirectivo && !trabajoToEdit;
+
   // Estado del formulario
-  const [carreraId, setCarreraId] = useState<number>(1);
+  const [carreraId, setCarreraId] = useState<number>(userCarreraId || 1);
   const [modalidad, setModalidad] = useState<string>('Monografía');
   const [titulo, setTitulo] = useState<string>('');
   const [fechaHora, setFechaHora] = useState<string>('');
   const [lugarId, setLugarId] = useState<number>(1);
   const [folio, setFolio] = useState<string>('Pendiente');
+  const [tomo, setTomo] = useState<number | undefined>(undefined);
+  const [numeroFolio, setNumeroFolio] = useState<number | undefined>(undefined);
   const [resultado, setResultado] = useState<string>('Pendiente');
 
   // Lista de estudiantes seleccionados (soporte para múltiples estudiantes)
@@ -110,30 +195,134 @@ export const useTrabajoForm = ({
     enabled: isOpen,
   });
 
-  // Cargar lista de estudiantes registrados para búsqueda activa
+  // Cargar lista de estudiantes generales registrados
   const { data: estudiantes = [] } = useQuery({
     queryKey: ['estudiantes'],
     queryFn: () => estudianteService.getEstudiantes(),
+    enabled: isOpen && (esDirectivo || !!trabajoToEdit),
+  });
+
+  // Consultar grupos de Experiencia Recepcional del profesor en el periodo escolar activo
+  const {
+    data: misGrupos = [],
+    isLoading: isLoadingGrupos,
+  } = useQuery({
+    queryKey: ['mis-grupos-actual', user?.numeroPersonal],
+    queryFn: () => cursoService.getMisGrupos({ soloActual: true }),
+    enabled: isOpen && esProfesorRegistrando,
+  });
+
+  // Consultar el periodo escolar vigente
+  const { data: periodoActual } = useQuery({
+    queryKey: ['periodo-actual'],
+    queryFn: () => cursoService.getPeriodoActual(),
     enabled: isOpen,
   });
+
+  // Consultar directamente a la API los participantes del trabajo al editar para garantizar datos actualizados
+  const { data: participantesDetalle } = useQuery({
+    queryKey: ['participantes-detalle', trabajoToEdit?.Id_TrabajoR],
+    queryFn: () => trabajoService.getParticipantesByTrabajo(trabajoToEdit!.Id_TrabajoR),
+    enabled: isOpen && !!trabajoToEdit?.Id_TrabajoR,
+  });
+
+  // Precondición: el profesor registrando no tiene grupos de ER asignados en el periodo actual
+  const sinGruposPeriodoActual = Boolean(
+    esProfesorRegistrando && !isLoadingGrupos && misGrupos.length === 0
+  );
+
+  // Extraer estudiantes de los grupos de ER del periodo actual asignados al profesor
+  const estudiantesGrupoActual = useMemo(() => {
+    const lista: Array<{
+      matricula: string;
+      nombreCompleto: string;
+      correo?: string;
+      nrc?: string;
+      nombreCurso?: string;
+    }> = [];
+
+    misGrupos.forEach((g) => {
+      const nrc = g.curso?.NRC || '';
+      const nombreCurso = g.curso?.Nombre || 'Experiencia Recepcional';
+      (g.estudiantes || []).forEach((est) => {
+        if (!lista.some((e) => e.matricula === est.Matricula)) {
+          lista.push({
+            matricula: est.Matricula,
+            nombreCompleto: est.NombreCompleto,
+            correo: est.CorreoInstitucional,
+            nrc,
+            nombreCurso,
+          });
+        }
+      });
+    });
+
+    return lista;
+  }, [misGrupos]);
+
+  // Información contextual del grupo y periodo para mostrar al profesor
+  const infoGrupos = useMemo(() => {
+    if (!esProfesorRegistrando) return undefined;
+    if (sinGruposPeriodoActual) return undefined;
+    const nrcs = misGrupos.map((g) => g.curso?.NRC).filter(Boolean).join(', ');
+    const periodoNom = periodoActual?.Nomenclatura ? ` (${periodoActual.Nomenclatura})` : '';
+    return `Mostrando alumnos de tu(s) grupo(s) de ER${periodoNom}: NRC ${nrcs || 'asignado'}.`;
+  }, [esProfesorRegistrando, sinGruposPeriodoActual, misGrupos, periodoActual]);
+
+  // Lista unificada de participantes académicos
+  const participantesLista: any[] = useMemo(() => {
+    if (participantesDetalle?.academicos && participantesDetalle.academicos.length > 0) {
+      return participantesDetalle.academicos;
+    }
+    return (
+      (trabajoToEdit as any)?.academicos ||
+      (trabajoToEdit as any)?.participantes ||
+      trabajoToEdit?.ParticipantesTrabajos ||
+      (trabajoToEdit as any)?.Participantes ||
+      []
+    );
+  }, [participantesDetalle, trabajoToEdit]);
+
+  // Lista unificada de estudiantes asignados
+  const estudiantesLista: any[] = useMemo(() => {
+    if (participantesDetalle?.estudiantes && participantesDetalle.estudiantes.length > 0) {
+      return participantesDetalle.estudiantes;
+    }
+    return (
+      (trabajoToEdit as any)?.estudiantes ||
+      trabajoToEdit?.EstudianteTrabajos ||
+      (trabajoToEdit as any)?.Estudiantes ||
+      []
+    );
+  }, [participantesDetalle, trabajoToEdit]);
 
   // Convertir académicos a opciones de Select
   const academicosOptions: SelectOption[] = useMemo(() => {
     return academicos.map((ac) => ({
-      value: ac.Numero_Personal || '',
+      value: ac.Numero_Personal !== undefined && ac.Numero_Personal !== null ? String(ac.Numero_Personal) : '',
       label: `${ac.Nombre} ${ac.ApellidoP} ${ac.ApellidoM || ''}`.trim(),
       sublabel: ac.CorreoInstitucional,
     }));
   }, [academicos]);
 
-  // Convertir estudiantes a opciones de Select
+  // Opciones de estudiantes:
+  // - Si es profesor registrando: únicamente alumnos inscritos en su grupo de ER del periodo escolar actual
+  // - Si es directivo o en modo edición: estudiantes del catálogo general o asignados
   const estudiantesOptions: SelectOption[] = useMemo(() => {
+    if (esProfesorRegistrando) {
+      return estudiantesGrupoActual.map((est) => ({
+        value: est.matricula,
+        label: `${est.nombreCompleto} (${est.matricula})`,
+        sublabel: `NRC ${est.nrc} - ${est.nombreCurso}${est.correo ? ` • ${est.correo}` : ''}`,
+      }));
+    }
+
     return estudiantes.map((est) => ({
       value: est.Matricula,
       label: `${est.NombreCompleto} (${est.Matricula})`,
       sublabel: est.CorreoInstitucional,
     }));
-  }, [estudiantes]);
+  }, [esProfesorRegistrando, estudiantesGrupoActual, estudiantes]);
 
   // Rellenar formulario cuando se abre en modo edición
   useEffect(() => {
@@ -143,6 +332,8 @@ export const useTrabajoForm = ({
         setModalidad(trabajoToEdit.Modalidad || 'Monografía');
         setCarreraId(trabajoToEdit.Id_Carrera || trabajoToEdit.Carrera?.Id_Carrera || 1);
         setLugarId(trabajoToEdit.Id_Lugar || trabajoToEdit.Lugar?.Id_Lugar || 1);
+        setTomo(trabajoToEdit.Tomo ?? undefined);
+        setNumeroFolio(trabajoToEdit.Numero_Folio ?? undefined);
         setFolio(trabajoToEdit.Folio || 'Pendiente');
         setResultado(trabajoToEdit.Resultado || 'Pendiente');
 
@@ -158,50 +349,35 @@ export const useTrabajoForm = ({
           setFechaHora('');
         }
 
-        // Cargar lista de estudiantes asignados
-        const listaEstudiantes = trabajoToEdit.estudiantes || trabajoToEdit.EstudianteTrabajos || [];
-        const mats = listaEstudiantes
-          .map((e) => e.Matricula || e.Estudiante?.Matricula)
+        // Cargar lista de estudiantes asignados inicialmente
+        const mats = estudiantesLista
+          .map((e: any) => e.Matricula || e.matricula || e.Estudiante?.Matricula || e.estudiante?.Matricula)
           .filter(Boolean) as string[];
 
         setMatriculasEstudiantes(mats.length > 0 ? mats : ['']);
 
-        // Cargar participantes
-        const participantes: any[] =
-          (trabajoToEdit as any).participantes ||
-          trabajoToEdit.ParticipantesTrabajos ||
-          (trabajoToEdit as any).Participantes ||
-          [];
-
-        const findByRol = (rolId: number, nombreRol: string) => {
-          const part = participantes.find(
-            (p: any) =>
-              p.Id_rol === rolId ||
-              p.RolDeParticipacion?.Id_rol === rolId ||
-              p.Rol_de_participacion?.Id_rol === rolId ||
-              p.RolDeParticipacion?.NombreRol?.toLowerCase() === nombreRol.toLowerCase() ||
-              p.Rol_de_participacion?.NombreRol?.toLowerCase() === nombreRol.toLowerCase()
-          );
-          return part?.Numero_Personal || part?.Academico?.Numero_Personal;
-        };
-
-        setDirectorId(findByRol(1, 'director'));
-        setCodirectorId(findByRol(2, 'codirector'));
-        setPresidenteId(findByRol(3, 'presidente'));
-        setSecretarioId(findByRol(4, 'secretario'));
-        setVocalId(findByRol(5, 'vocal'));
-        setSinodalId(findByRol(6, 'sinodal'));
+        // Cargar participantes disponibles inicialmente
+        setDirectorId(findNumeroPersonalByRol(participantesLista, 1, 'director'));
+        setCodirectorId(findNumeroPersonalByRol(participantesLista, 2, 'codirector'));
+        setPresidenteId(findNumeroPersonalByRol(participantesLista, 3, 'presidente'));
+        setSecretarioId(findNumeroPersonalByRol(participantesLista, 4, 'secretario'));
+        setVocalId(findNumeroPersonalByRol(participantesLista, 5, 'vocal'));
+        setSinodalId(findNumeroPersonalByRol(participantesLista, 6, 'sinodal'));
       } else {
         // Reset a valores por defecto para nuevo registro
         setTitulo('');
         setModalidad('Monografía');
-        setCarreraId(1);
+        setCarreraId(userCarreraId || 1);
         setLugarId(1);
         setFechaHora('');
+        setTomo(undefined);
+        setNumeroFolio(undefined);
         setFolio('Pendiente');
         setResultado('Pendiente');
         setMatriculasEstudiantes(['']);
-        setDirectorId(undefined);
+        // Si el usuario es docente, preasignarlo como Director del trabajo
+        const titularDirector = !esDirectivo && user?.numeroPersonal ? String(user.numeroPersonal) : undefined;
+        setDirectorId(titularDirector);
         setCodirectorId(undefined);
         setPresidenteId(undefined);
         setSecretarioId(undefined);
@@ -212,11 +388,60 @@ export const useTrabajoForm = ({
     }
   }, [isOpen, trabajoToEdit]);
 
+  // Sincronizar participantes cuando lleguen datos de la API o cambie la lista de participantes
+  useEffect(() => {
+    if (isOpen && trabajoToEdit && participantesLista.length > 0) {
+      const d = findNumeroPersonalByRol(participantesLista, 1, 'director');
+      const cd = findNumeroPersonalByRol(participantesLista, 2, 'codirector');
+      const pres = findNumeroPersonalByRol(participantesLista, 3, 'presidente');
+      const sec = findNumeroPersonalByRol(participantesLista, 4, 'secretario');
+      const voc = findNumeroPersonalByRol(participantesLista, 5, 'vocal');
+      const sin = findNumeroPersonalByRol(participantesLista, 6, 'sinodal');
+
+      if (d !== undefined) setDirectorId(d);
+      if (cd !== undefined) setCodirectorId(cd);
+      if (pres !== undefined) setPresidenteId(pres);
+      if (sec !== undefined) setSecretarioId(sec);
+      if (voc !== undefined) setVocalId(voc);
+      if (sin !== undefined) setSinodalId(sin);
+    }
+  }, [isOpen, trabajoToEdit, participantesLista]);
+
+  // Sincronizar estudiantes cuando lleguen datos de la API
+  useEffect(() => {
+    if (isOpen && trabajoToEdit && estudiantesLista.length > 0) {
+      const mats = estudiantesLista
+        .map((e: any) => e.Matricula || e.matricula || e.Estudiante?.Matricula || e.estudiante?.Matricula)
+        .filter(Boolean) as string[];
+      if (mats.length > 0) {
+        setMatriculasEstudiantes(mats);
+      }
+    }
+  }, [isOpen, trabajoToEdit, estudiantesLista]);
+
   // Reglas de negocio CU-05:
   const estadoNombreActual = trabajoToEdit?.EstadoListum?.EstadoNombre || 'Borrador';
   const isFinalizado = estadoNombreActual === 'Finalizado';
   const isAprobadoOGenerado = estadoNombreActual === 'Aprobado' || estadoNombreActual === 'Generado';
   const isFolioResultadoLocked = isAprobadoOGenerado || !isFinalizado;
+
+  const handleTomoChange = (val: number | undefined) => {
+    setTomo(val);
+    if (val !== undefined && val !== null && numeroFolio !== undefined && numeroFolio !== null) {
+      setFolio(`Tomo ${val} - Folio ${numeroFolio}`);
+    } else if (val !== undefined && val !== null) {
+      setFolio(`Tomo ${val}`);
+    }
+  };
+
+  const handleNumeroFolioChange = (val: number | undefined) => {
+    setNumeroFolio(val);
+    if (tomo !== undefined && tomo !== null && val !== undefined && val !== null) {
+      setFolio(`Tomo ${tomo} - Folio ${val}`);
+    } else if (val !== undefined && val !== null) {
+      setFolio(`Folio ${val}`);
+    }
+  };
 
   // Manejo dinámico de estudiantes
   const handleAddEstudiante = () => {
@@ -314,6 +539,11 @@ export const useTrabajoForm = ({
     }
 
     // 6. Estudiantes Asignados
+    if (esProfesorRegistrando && sinGruposPeriodoActual) {
+      newErrors.estudiantes =
+        'No cuenta con un grupo de Experiencia Recepcional asignado en el periodo escolar vigente. No es posible registrar el trabajo.';
+    }
+
     const validMatriculas = matriculasEstudiantes.filter((m) => m && m.trim() !== '');
     if (validMatriculas.length === 0) {
       newErrors.estudiantes = 'Debe asignar al menos un estudiante al trabajo recepcional.';
@@ -324,6 +554,15 @@ export const useTrabajoForm = ({
       const matriculasUnicas = new Set(validMatriculas);
       if (matriculasUnicas.size !== validMatriculas.length) {
         newErrors.estudiantes = 'No puede seleccionar dos veces al mismo estudiante.';
+      } else if (esProfesorRegistrando) {
+        // Validación estricta para profesor: los alumnos deben pertenecer a su grupo de ER activo
+        const permitidas = new Set(estudiantesGrupoActual.map((e) => e.matricula));
+        const invalidas = validMatriculas.filter((m) => !permitidas.has(m));
+        if (invalidas.length > 0) {
+          newErrors.estudiantes = `El alumno (${invalidas.join(
+            ', '
+          )}) no está inscrito en tus grupos de Experiencia Recepcional del periodo escolar actual.`;
+        }
       }
     }
 
@@ -363,6 +602,19 @@ export const useTrabajoForm = ({
         'Un profesor no puede desempeñar múltiples roles en el mismo trabajo recepcional.';
     }
 
+    if (!isFolioResultadoLocked) {
+      if (tomo !== undefined && tomo !== null && tomo < 1) {
+        newErrors.tomo = 'El Tomo debe ser mayor o igual a 1.';
+      }
+      if (
+        numeroFolio !== undefined &&
+        numeroFolio !== null &&
+        (numeroFolio < 1 || numeroFolio > 100)
+      ) {
+        newErrors.numeroFolio = 'El Folio debe estar en el rango de 1 a 100.';
+      }
+    }
+
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
       toast.error('Por favor complete todos los campos obligatorios con información válida.');
@@ -384,6 +636,8 @@ export const useTrabajoForm = ({
       Id_Carrera: carreraId,
       Id_Lugar: lugarId,
       Folio: folio.trim() || 'Pendiente',
+      Tomo: tomo !== undefined && tomo !== null ? tomo : null,
+      Numero_Folio: numeroFolio !== undefined && numeroFolio !== null ? numeroFolio : null,
       Resultado: resultado.trim() || 'Pendiente',
       participantes,
       matriculasEstudiantes: validMatriculas,
@@ -412,6 +666,12 @@ export const useTrabajoForm = ({
     setLugarId,
     folio,
     setFolio,
+    tomo,
+    setTomo,
+    numeroFolio,
+    setNumeroFolio,
+    handleTomoChange,
+    handleNumeroFolioChange,
     resultado,
     setResultado,
     matriculasEstudiantes,
@@ -432,6 +692,11 @@ export const useTrabajoForm = ({
     estudiantesOptions,
     lugarConflictivo,
     isFolioResultadoLocked,
+    isJefeCarrera: esJefeCarrera,
+    sinGruposPeriodoActual,
+    infoGrupos,
+    isLoadingGrupos,
+    periodoActual,
     handleAddEstudiante,
     handleRemoveEstudiante,
     handleEstudianteChange,

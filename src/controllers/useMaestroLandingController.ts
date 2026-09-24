@@ -1,11 +1,20 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { trabajoService, type GuardarTrabajoPayload } from '@/services/trabajos/trabajoService';
 import type { TrabajoRecepcional } from '@/domain/models/trabajo.types';
 import { useAuth } from '@/context/AuthContext';
-import { isDirectivo, isSecretariaGrupo, isPersonalAdministrativo } from '@/utils/roleUtils';
+import {
+  isDirectivo,
+  isSecretariaGrupo,
+  isPersonalAdministrativo,
+  isJefeCarrera,
+  getUserCarreraId,
+} from '@/utils/roleUtils';
 import { documentoService } from '@/services/documentos/documentoService';
+import { academicoService } from '@/services/academicos/academicoService';
+import { authService } from '@/services/auth/authService';
+import { CARRERAS_OPCIONES } from '@/presentation/views/profesor/constants/trabajoCatalogos';
 
 export type SortField = 'folio' | 'modalidad' | 'fecha';
 export type SortOrder = 'asc' | 'desc';
@@ -15,8 +24,51 @@ export const useMaestroLandingController = () => {
   const userIsDirectivo = isDirectivo(user);
   const isSecretariaGrupoUser = isSecretariaGrupo(user);
   const isPersonalAdmin = isPersonalAdministrativo(user);
+  const isJefeCarreraUser = isJefeCarrera(user);
   const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState('');
+  
+  // Cargar lista de académicos registrados para resolver Id_Carrera del Jefe de Carrera si no está en sesión
+  const { data: academicos = [] } = useQuery({
+    queryKey: ['academicos'],
+    queryFn: () => academicoService.getAcademicos(),
+    enabled: isJefeCarreraUser,
+  });
+
+  // Determinar Id_Carrera para el usuario Jefe de Carrera
+  const jefeCarreraId = useMemo(() => {
+    if (!isJefeCarreraUser) return undefined;
+    const directId = getUserCarreraId(user);
+    if (directId) return directId;
+
+    const currentNum =
+      user?.numeroPersonal !== undefined && user?.numeroPersonal !== null
+        ? String(user.numeroPersonal)
+        : undefined;
+    if (currentNum && academicos.length > 0) {
+      const match = academicos.find(
+        (a: any) => String(a.Numero_Personal ?? a.numeroPersonal) === currentNum
+      );
+      if (match?.Id_Carrera) {
+        return Number(match.Id_Carrera);
+      }
+    }
+    return undefined;
+  }, [isJefeCarreraUser, user, academicos]);
+
+  // Si se encontró el Id_Carrera pero no estaba almacenado en sesión, sincronizarlo
+  useEffect(() => {
+    if (jefeCarreraId && user && (!(user as any).Id_Carrera || !(user as any).idCarrera)) {
+      const updatedUser = { ...user, Id_Carrera: jefeCarreraId, idCarrera: jefeCarreraId };
+      authService.setStoredUser(updatedUser);
+    }
+  }, [jefeCarreraId, user]);
+
+  const jefeCarreraNombre = useMemo(() => {
+    if (!jefeCarreraId) return null;
+    const opt = CARRERAS_OPCIONES.find((c) => c.id === jefeCarreraId);
+    return opt?.nombre || null;
+  }, [jefeCarreraId]);
   
   // Estado del modal de registro/edición
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -34,8 +86,13 @@ export const useMaestroLandingController = () => {
     error,
     refetch,
   } = useQuery({
-    queryKey: ['trabajos'],
-    queryFn: () => trabajoService.getTrabajos(),
+    queryKey: ['trabajos', user?.numeroPersonal, jefeCarreraId],
+    queryFn: () =>
+      trabajoService.getTrabajos({
+        numeroPersonal: user?.numeroPersonal,
+        Numero_Personal: user?.numeroPersonal,
+        Id_Carrera: jefeCarreraId,
+      }),
   });
 
   // Mutación para crear trabajo
@@ -160,6 +217,21 @@ export const useMaestroLandingController = () => {
       );
     }
 
+    // Regla de Visibilidad estricta para Jefe de Carrera:
+    // Solo puede ver los trabajos pertenecientes a su licenciatura (Id_Carrera)
+    if (isJefeCarreraUser && jefeCarreraId) {
+      result = result.filter((t) => {
+        const carreraIdTrabajo = t.Id_Carrera || t.Carrera?.Id_Carrera;
+        if (carreraIdTrabajo !== undefined && carreraIdTrabajo !== null) {
+          return Number(carreraIdTrabajo) === Number(jefeCarreraId);
+        }
+        if (jefeCarreraNombre && t.Carrera?.NombreCarrera) {
+          return t.Carrera.NombreCarrera.toLowerCase().trim() === jefeCarreraNombre.toLowerCase().trim();
+        }
+        return false;
+      });
+    }
+
     // 1. Filtrado por término de búsqueda
     if (searchTerm.trim() !== '') {
       const term = searchTerm.toLowerCase();
@@ -167,7 +239,12 @@ export const useMaestroLandingController = () => {
         const matchTitulo = t.Titulo?.toLowerCase().includes(term);
         const matchCarrera = t.Carrera?.NombreCarrera?.toLowerCase().includes(term);
         const matchModalidad = t.Modalidad?.toLowerCase().includes(term);
-        const matchFolio = t.Folio?.toLowerCase().includes(term);
+        const matchFolio =
+          t.Folio?.toLowerCase().includes(term) ||
+          (t.Tomo !== undefined && t.Tomo !== null && `tomo ${t.Tomo}`.includes(term)) ||
+          (t.Numero_Folio !== undefined && t.Numero_Folio !== null && `folio ${t.Numero_Folio}`.includes(term)) ||
+          (t.Tomo !== undefined && t.Tomo !== null && String(t.Tomo) === term) ||
+          (t.Numero_Folio !== undefined && t.Numero_Folio !== null && String(t.Numero_Folio) === term);
         const matchEstado = t.EstadoListum?.EstadoNombre?.toLowerCase().includes(term);
         
         // Búsqueda en estudiantes
@@ -204,6 +281,18 @@ export const useMaestroLandingController = () => {
       }
 
       if (sortField === 'folio') {
+        // Ordenamiento jerárquico por Tomo y Número de Folio
+        const tomoA = a.Tomo ?? (a.Folio?.toLowerCase().includes('tomo') ? parseInt(a.Folio.replace(/[^0-9]/g, ''), 10) : 0);
+        const tomoB = b.Tomo ?? (b.Folio?.toLowerCase().includes('tomo') ? parseInt(b.Folio.replace(/[^0-9]/g, ''), 10) : 0);
+        const numFolioA = a.Numero_Folio ?? 0;
+        const numFolioB = b.Numero_Folio ?? 0;
+
+        if (tomoA || tomoB || numFolioA || numFolioB) {
+          const scoreA = (tomoA || 0) * 1000 + (numFolioA || 0);
+          const scoreB = (tomoB || 0) * 1000 + (numFolioB || 0);
+          return sortOrder === 'asc' ? scoreA - scoreB : scoreB - scoreA;
+        }
+
         const valA = (a.Folio || '').trim();
         const valB = (b.Folio || '').trim();
         
@@ -229,7 +318,7 @@ export const useMaestroLandingController = () => {
     });
 
     return result;
-  }, [trabajos, searchTerm, sortField, sortOrder, isPersonalAdmin]);
+  }, [trabajos, searchTerm, sortField, sortOrder, isPersonalAdmin, isJefeCarreraUser, jefeCarreraId]);
 
   // Estado del cuadro de diálogo de confirmación in-app
   const [confirmDialog, setConfirmDialog] = useState<{
@@ -382,8 +471,22 @@ export const useMaestroLandingController = () => {
 
   // Mutación para finalizar trabajo recepcional
   const finalizarMutation = useMutation({
-    mutationFn: ({ id, folio, resultado }: { id: number; folio: string; resultado: string }) =>
+    mutationFn: ({
+      id,
+      tomo,
+      numeroFolio,
+      folio,
+      resultado,
+    }: {
+      id: number;
+      tomo?: number | null;
+      numeroFolio?: number | null;
+      folio: string;
+      resultado: string;
+    }) =>
       trabajoService.finalizarTrabajo(id, {
+        Tomo: tomo,
+        Numero_Folio: numeroFolio,
         Folio: folio,
         Resultado: resultado,
         Numero_Personal: user?.numeroPersonal,
@@ -391,7 +494,7 @@ export const useMaestroLandingController = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['trabajos'] });
       toast.success('Trabajo recepcional finalizado con éxito', {
-        description: 'Se ha asignado el folio de acta y el resultado. El estado ha cambiado a "Finalizado".',
+        description: 'Se ha asignado el libro, folio de acta y el resultado. El estado ha cambiado a "Finalizado".',
       });
       setIsFinalizarModalOpen(false);
       setTrabajoParaFinalizar(null);
@@ -403,12 +506,19 @@ export const useMaestroLandingController = () => {
     },
   });
 
-  const handleFinalizarSubmit = async (folio: string, resultado: string) => {
+  const handleFinalizarSubmit = async (payload: {
+    tomo?: number | null;
+    numeroFolio?: number | null;
+    folio: string;
+    resultado: string;
+  }) => {
     if (!trabajoParaFinalizar) return;
     await finalizarMutation.mutateAsync({
       id: trabajoParaFinalizar.Id_TrabajoR,
-      folio,
-      resultado,
+      tomo: payload.tomo,
+      numeroFolio: payload.numeroFolio,
+      folio: payload.folio,
+      resultado: payload.resultado,
     });
   };
 
@@ -478,6 +588,9 @@ export const useMaestroLandingController = () => {
     handleCloseConfirmDialog,
     userIsDirectivo,
     isSecretariaGrupoUser,
+    isJefeCarreraUser,
+    jefeCarreraId,
+    jefeCarreraNombre,
     userNumeroPersonal: user?.numeroPersonal,
   };
 };

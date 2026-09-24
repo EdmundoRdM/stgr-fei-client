@@ -20,6 +20,9 @@ export interface AcademicoData {
   ApellidoP: string;
   ApellidoM?: string;
   CorreoInstitucional?: string;
+  Id_Carrera?: number;
+  Id_Rol?: number;
+  Carrera?: Carrera;
 }
 
 export interface RolParticipacionData {
@@ -61,6 +64,8 @@ export interface TrabajoRecepcional {
   Id_TrabajoR: number;
   Titulo: string;
   Folio: string;
+  Tomo?: number | null;
+  Numero_Folio?: number | null;
   Modalidad: string;
   Fecha_defensa: string;
   Resultado: string;
@@ -75,4 +80,41 @@ export interface TrabajoRecepcional {
   ParticipantesTrabajos?: Participante[];
   EstudianteTrabajos?: EstudianteAsignado[];
   checklistCompleto?: boolean;
+}
+
+export interface SugerenciaFolioResponse {
+  Id_Carrera: number;
+  Tomo: number;
+  Numero_Folio: number;
+  FolioSugerido: string;
+  foliosOcupadosEnTomo: number;
+  foliosDisponiblesEnTomo: number;
+  esNuevoTomo: boolean;
+  estaLleno: boolean;
+  mensaje?: string;
+}
+
+export interface EstadoTomoResponse {
+  Id_Carrera?: number;
+  Tomo: number;
+  foliosOcupados: number;
+  foliosDisponibles: number;
+  foliosTomados?: number[];
+  estaLleno: boolean;
+}
+
+export interface ResumenTomo {
+  Tomo: number;
+  foliosOcupados: number;
+  foliosDisponibles: number;
+  estaLleno: boolean;
+  [key: string]: any;
+}
+
+export interface FinalizarTrabajoPayload {
+  Tomo?: number | null;
+  Numero_Folio?: number | null;
+  Folio?: string;
+  Resultado: string;
+  Numero_Personal?: string | number | null;
 }

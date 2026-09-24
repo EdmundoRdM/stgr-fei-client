@@ -15,6 +15,12 @@ export interface User {
   Id_Rol?: number | null;
   idRol?: number | null;
   Id_rol?: number | null;
+  Id_Carrera?: number | null;
+  idCarrera?: number | null;
+  Carrera?: {
+    Id_Carrera?: number;
+    NombreCarrera?: string;
+  };
   Rol?: {
     Id_Rol?: number;
     NombreRol?: string;
