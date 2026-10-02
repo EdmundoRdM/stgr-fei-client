@@ -22,8 +22,12 @@ import { ConfirmDialog } from '@/presentation/components/ConfirmDialog';
 import { TrabajoModalForm } from './TrabajoModalForm';
 import { RecepcionDocumentosModal } from '../secretaria/RecepcionDocumentosModal';
 import { FinalizarTrabajoModal } from '../secretaria/FinalizarTrabajoModal';
+import { GenerarActaModal } from '../secretaria/GenerarActaModal';
 import type { TrabajoRecepcional } from '@/domain/models/trabajo.types';
-import { resolveRoleName, canFinalizarTrabajo } from '@/utils/roleUtils';
+import { resolveRoleName } from '@/utils/roleUtils';
+
+
+
 
 export const MaestroLandingView: React.FC = () => {
   const { user, logout } = useAuth();
@@ -56,29 +60,41 @@ export const MaestroLandingView: React.FC = () => {
     isGenerandoActa,
     isFinalizando,
     refetch,
-    // Modal Props
+
     isModalOpen,
     trabajoToEdit,
     handleCloseModal,
     handleSaveTrabajo,
     isSaving,
-    // Finalizar Modal
+
     isFinalizarModalOpen,
     trabajoParaFinalizar,
-    // Documentos Modal
+
+    isGenerarActaModalOpen,
+    trabajoParaActa,
+    handleCerrarGenerarActa,
+    handleGenerarActaSubmit,
+
     isDocumentosModalOpen,
     trabajoParaDocumentos,
-    // Confirm Dialog
+
     confirmDialog,
     handleCloseConfirmDialog,
-    userIsDirectivo,
-    isSecretariaGrupoUser,
     isJefeCarreraUser,
+
     jefeCarreraNombre,
     userNumeroPersonal,
+    userCanRegistrar,
+    userCanRecibirDocumentos,
+    userCanGenerarActa,
+    userCanFinalizarTrabajo,
+    userCanValidarTrabajo,
+    canEditarTrabajo,
+    canEliminarTrabajo,
+    subtituloVista,
   } = useMaestroLandingController();
 
-  // Helper para renderizar los iconos de ordenamiento en los encabezados
+
   const renderSortIndicator = (field: SortField) => {
     if (sortField !== field) {
       return <ChevronsUpDown className="w-3 h-3 text-slate-700 opacity-60 ml-0.5 inline-block shrink-0" />;
@@ -128,9 +144,7 @@ export const MaestroLandingView: React.FC = () => {
             Sistema de gestión de trabajos recepcionales
           </h1>
           <p className="text-xs sm:text-sm font-semibold text-slate-600">
-            {isJefeCarreraUser && jefeCarreraNombre
-              ? `Licenciatura en ${jefeCarreraNombre} — Supervisión Académica`
-              : 'Experiencia Recepcional - Sección 1'}
+            {subtituloVista}
           </p>
         </div>
 
@@ -160,13 +174,15 @@ export const MaestroLandingView: React.FC = () => {
               <RefreshCw className="w-4 h-4" />
             </button>
 
-            <button
-              onClick={handleRegistrar}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-[#cfd2d8] hover:bg-[#c3c7d0] active:scale-[0.98] px-4 py-1.5 text-xs sm:text-sm font-semibold text-slate-800 border border-slate-300 transition-all shadow-xs cursor-pointer"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Registrar Trabajo Recepcional</span>
-            </button>
+            {userCanRegistrar && (
+              <button
+                onClick={handleRegistrar}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-[#cfd2d8] hover:bg-[#c3c7d0] active:scale-[0.98] px-4 py-1.5 text-xs sm:text-sm font-semibold text-slate-800 border border-slate-300 transition-all shadow-xs cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Registrar Trabajo Recepcional</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -299,9 +315,8 @@ export const MaestroLandingView: React.FC = () => {
                   return (
                     <tr
                       key={trabajo.Id_TrabajoR || index}
-                      className={`hover:bg-[#d8dce4] transition-colors border-b border-white ${
-                        isEven ? 'bg-[#eaedf2]' : 'bg-[#e2e5ea]'
-                      }`}
+                      className={`hover:bg-[#d8dce4] transition-colors border-b border-white ${isEven ? 'bg-[#eaedf2]' : 'bg-[#e2e5ea]'
+                        }`}
                     >
                       {/* Tomo y Folio del Acta */}
                       <td className="w-20 min-w-[75px] max-w-[90px] py-2 px-1 text-center border-r border-white font-medium text-slate-700 text-[11px] whitespace-nowrap">
@@ -332,7 +347,7 @@ export const MaestroLandingView: React.FC = () => {
                       <td className="min-w-[130px] max-w-[160px] p-0 border-r border-white align-top">
                         {participantes.length > 0 ? (
                           <div className="flex flex-col h-full justify-between">
-                            {participantes.map((p, idx) => {
+                            {participantes.map((p: any, idx: number) => {
                               const nombreCompleto = `${p.Academico?.Nombre || ''} ${p.Academico?.ApellidoP || ''} ${p.Academico?.ApellidoM || ''}`.trim();
                               return (
                                 <div
@@ -353,7 +368,7 @@ export const MaestroLandingView: React.FC = () => {
                       <td className="min-w-[95px] max-w-[110px] p-0 border-r border-white align-top">
                         {participantes.length > 0 ? (
                           <div className="flex flex-col h-full justify-between">
-                            {participantes.map((p, idx) => {
+                            {participantes.map((p: any, idx: number) => {
                               const rolNombre = p.RolDeParticipacion?.NombreRol || p.Rol_de_participacion?.NombreRol || 'DIRECTOR';
                               return (
                                 <div
@@ -385,7 +400,7 @@ export const MaestroLandingView: React.FC = () => {
                       <td className="min-w-[110px] max-w-[140px] py-2 px-1.5 text-center border-r border-white font-semibold text-slate-800 text-[11px] leading-tight">
                         {estudiantes.length > 0 ? (
                           <div className="space-y-1">
-                            {estudiantes.map((e, idx) => (
+                            {estudiantes.map((e: any, idx: number) => (
                               <div key={e.Id_EstudianteTrabajo || idx}>
                                 {e.Estudiante?.NombreCompleto || e.Estudiante?.Matricula || 'Alumno Registrado'}
                               </div>
@@ -396,10 +411,41 @@ export const MaestroLandingView: React.FC = () => {
                         )}
                       </td>
 
-                      {/* Fecha de defensa (Compacto) */}
-                      <td className="w-20 min-w-[75px] max-w-[85px] py-2 px-1 text-center border-r border-white text-slate-700 whitespace-nowrap font-mono text-[10.5px]">
-                        {trabajo.Fecha_defensa ? trabajo.Fecha_defensa.split('T')[0] : 'Por definir'}
+
+                      {/* Fecha de defensa (Fecha y Horario) */}
+                      <td className="w-24 min-w-[85px] max-w-[110px] py-1.5 px-1 text-center border-r border-white text-slate-700 whitespace-nowrap text-[10.5px]">
+                        {trabajo.Fecha_defensa ? (
+                          <div className="flex flex-col items-center leading-tight">
+                            <span className="font-mono font-semibold text-slate-800">
+                              {trabajo.Fecha_defensa.split('T')[0]}
+                            </span>
+                            <span className="text-[9.5px] text-slate-500 font-mono">
+                              {(() => {
+                                const hIni = trabajo.Fecha_defensa.includes('T')
+                                  ? trabajo.Fecha_defensa.split('T')[1].substring(0, 5)
+                                  : '';
+                                const hFin = trabajo.Fecha_fin_defensa && trabajo.Fecha_fin_defensa.includes('T')
+                                  ? trabajo.Fecha_fin_defensa.split('T')[1].substring(0, 5)
+                                  : '';
+                                if (hIni && hFin) return `${hIni} - ${hFin}`;
+                                if (hIni) return `${hIni} hrs`;
+                                return '';
+                              })()}
+                            </span>
+                            {trabajo.Lugar?.Nombre && (
+                              <span
+                                className="text-[9px] text-[#00873e] font-semibold truncate max-w-[95px] mt-0.5"
+                                title={trabajo.Lugar.Nombre}
+                              >
+                                {trabajo.Lugar.Nombre}
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-slate-400 italic text-[10px]">Por definir</span>
+                        )}
                       </td>
+
 
                       {/* Resultado Obtenido */}
                       <td className="w-24 min-w-[90px] max-w-[100px] py-2 px-1 text-center border-r border-white text-[10.5px] font-bold text-slate-700 leading-tight">
@@ -414,36 +460,50 @@ export const MaestroLandingView: React.FC = () => {
                       {/* Opciones (RBAC para CU-01 a CU-06) */}
                       <td className="w-24 min-w-[90px] max-w-[115px] py-1.5 px-1 text-center align-middle">
                         {isBorrador ? (
-                          <div className="flex flex-col items-center gap-1 w-full">
-                            <button
-                              onClick={() => handleEditar(trabajo)}
-                              className="w-16 py-0.5 rounded bg-[#f39c12] hover:bg-[#d68910] active:scale-95 text-white font-bold text-[10px] shadow-2xs transition-all cursor-pointer"
-                            >
-                              Editar
-                            </button>
-                            <button
-                              onClick={() => handleEliminar(trabajo.Id_TrabajoR)}
-                              className="w-16 py-0.5 rounded bg-[#e74c3c] hover:bg-[#c0392b] active:scale-95 text-white font-bold text-[10px] shadow-2xs transition-all cursor-pointer"
-                            >
-                              Eliminar
-                            </button>
-                            <button
-                              onClick={() => handleEnviar(trabajo.Id_TrabajoR)}
-                              className="w-16 py-0.5 rounded bg-[#3498db] hover:bg-[#2980b9] active:scale-95 text-white font-bold text-[10px] shadow-2xs transition-all cursor-pointer"
-                            >
-                              Enviar
-                            </button>
-                          </div>
-                        ) : estadoNombre === 'Registrado' ? (
-                          userIsDirectivo ? (
+                          (canEditarTrabajo(estadoNombre, trabajo) || canEliminarTrabajo(estadoNombre, trabajo)) ? (
                             <div className="flex flex-col items-center gap-1 w-full">
-                              <button
-                                onClick={() => handleEditar(trabajo)}
-                                className="w-16 py-0.5 rounded bg-[#f39c12] hover:bg-[#d68910] active:scale-95 text-white font-bold text-[10px] shadow-2xs transition-all cursor-pointer"
-                                title="Editar trabajo recepcional"
-                              >
-                                Editar
-                              </button>
+                              {canEditarTrabajo(estadoNombre, trabajo) && (
+                                <button
+                                  onClick={() => handleEditar(trabajo)}
+                                  className="w-16 py-0.5 rounded bg-[#f39c12] hover:bg-[#d68910] active:scale-95 text-white font-bold text-[10px] shadow-2xs transition-all cursor-pointer"
+                                >
+                                  Editar
+                                </button>
+                              )}
+                              {canEliminarTrabajo(estadoNombre, trabajo) && (
+                                <button
+                                  onClick={() => handleEliminar(trabajo.Id_TrabajoR)}
+                                  className="w-16 py-0.5 rounded bg-[#e74c3c] hover:bg-[#c0392b] active:scale-95 text-white font-bold text-[10px] shadow-2xs transition-all cursor-pointer"
+                                >
+                                  Eliminar
+                                </button>
+                              )}
+                              {canEditarTrabajo(estadoNombre, trabajo) && (
+                                <button
+                                  onClick={() => handleEnviar(trabajo.Id_TrabajoR)}
+                                  className="w-16 py-0.5 rounded bg-[#3498db] hover:bg-[#2980b9] active:scale-95 text-white font-bold text-[10px] shadow-2xs transition-all cursor-pointer"
+                                >
+                                  Enviar
+                                </button>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-[10px] font-semibold text-slate-500 italic">
+                              Borrador
+                            </span>
+                          )
+                        ) : estadoNombre === 'Registrado' ? (
+                          userCanValidarTrabajo ? (
+                            <div className="flex flex-col items-center gap-1 w-full">
+                              {canEditarTrabajo(estadoNombre, trabajo) && (
+                                <button
+                                  onClick={() => handleEditar(trabajo)}
+                                  className="w-16 py-0.5 rounded bg-[#f39c12] hover:bg-[#d68910] active:scale-95 text-white font-bold text-[10px] shadow-2xs transition-all cursor-pointer"
+                                  title="Editar trabajo recepcional"
+                                >
+                                  Editar
+                                </button>
+                              )}
                               <button
                                 onClick={() => handleAceptar(trabajo)}
                                 className="w-16 py-0.5 rounded bg-[#00873e] hover:bg-[#007033] active:scale-95 text-white font-bold text-[10px] shadow-2xs transition-all flex items-center justify-center gap-0.5 cursor-pointer"
@@ -467,20 +527,22 @@ export const MaestroLandingView: React.FC = () => {
                             </span>
                           )
                         ) : estadoNombre === 'Aprobado' ? (
-                          isSecretariaGrupoUser || userIsDirectivo ? (
+                          (userCanRecibirDocumentos || canEditarTrabajo(estadoNombre, trabajo) || canEliminarTrabajo(estadoNombre, trabajo)) ? (
                             <div className="flex flex-col items-center gap-1 w-full">
-                              {/* Botón Documentación */}
-                              <button
-                                onClick={() => handleAbrirDocumentos(trabajo)}
-                                className="w-22 py-0.5 rounded bg-[#003882] hover:bg-[#00275c] active:scale-95 text-white font-bold text-[10px] shadow-2xs transition-all flex items-center justify-center gap-1 cursor-pointer"
-                                title="Control documental de recepción de requisitos"
-                              >
-                                <Files className="w-2.5 h-2.5" />
-                                <span>Documentación</span>
-                              </button>
+                              {/* Botón Documentación: Solo Secretarías */}
+                              {userCanRecibirDocumentos && (
+                                <button
+                                  onClick={() => handleAbrirDocumentos(trabajo)}
+                                  className="w-22 py-0.5 rounded bg-[#003882] hover:bg-[#00275c] active:scale-95 text-white font-bold text-[10px] shadow-2xs transition-all flex items-center justify-center gap-1 cursor-pointer"
+                                  title="Control documental de recepción de requisitos"
+                                >
+                                  <Files className="w-2.5 h-2.5" />
+                                  <span>Documentación</span>
+                                </button>
+                              )}
 
                               {/* Botón Generar Acta (Visible si y solo si se completa el checklist de documentos) */}
-                              {trabajo.checklistCompleto && (
+                              {userCanGenerarActa && trabajo.checklistCompleto && (
                                 <button
                                   onClick={() => handleGenerarActa(trabajo)}
                                   className="w-22 py-0.5 rounded bg-[#00873e] hover:bg-[#007033] active:scale-95 text-white font-bold text-[10px] shadow-2xs transition-all flex items-center justify-center gap-1 cursor-pointer animate-fadeIn"
@@ -491,15 +553,17 @@ export const MaestroLandingView: React.FC = () => {
                                 </button>
                               )}
 
-                              <button
-                                onClick={() => handleEditar(trabajo)}
-                                className="w-22 py-0.5 rounded bg-[#f39c12] hover:bg-[#d68910] active:scale-95 text-white font-bold text-[10px] shadow-2xs transition-all cursor-pointer"
-                                title="Editar trabajo recepcional"
-                              >
-                                Editar
-                              </button>
+                              {canEditarTrabajo(estadoNombre, trabajo) && (
+                                <button
+                                  onClick={() => handleEditar(trabajo)}
+                                  className="w-22 py-0.5 rounded bg-[#f39c12] hover:bg-[#d68910] active:scale-95 text-white font-bold text-[10px] shadow-2xs transition-all cursor-pointer"
+                                  title="Editar trabajo recepcional"
+                                >
+                                  Editar
+                                </button>
+                              )}
 
-                              {userIsDirectivo && (
+                              {canEliminarTrabajo(estadoNombre, trabajo) && (
                                 <button
                                   onClick={() => handleEliminar(trabajo.Id_TrabajoR)}
                                   className="w-22 py-0.5 rounded bg-[#e74c3c] hover:bg-[#c0392b] active:scale-95 text-white font-bold text-[10px] shadow-2xs transition-all cursor-pointer"
@@ -514,36 +578,60 @@ export const MaestroLandingView: React.FC = () => {
                               Aprobado
                             </span>
                           )
-                        ) : isSecretariaGrupoUser || userIsDirectivo ? (
-                          <div className="flex flex-col items-center gap-1 w-full">
-                            {/* Botón Finalizar: Visible si el trabajo está en 'Generado' y el usuario tiene permisos */}
-                            {estadoNombre === 'Generado' && canFinalizarTrabajo(user) && (
+                        ) : estadoNombre === 'Generado' ? (
+                          (userCanFinalizarTrabajo || canEditarTrabajo(estadoNombre, trabajo) || canEliminarTrabajo(estadoNombre, trabajo)) ? (
+                            <div className="flex flex-col items-center gap-1 w-full">
+                              {/* Botón Finalizar: Visible si el trabajo está en 'Generado' y el usuario tiene permisos */}
+                              {userCanFinalizarTrabajo && (
+                                <button
+                                  onClick={() => handleAbrirFinalizar(trabajo)}
+                                  className="w-16 py-0.5 rounded bg-[#00873e] hover:bg-[#007033] active:scale-95 text-white font-bold text-[10px] shadow-2xs transition-all cursor-pointer flex items-center justify-center gap-1 animate-fadeIn"
+                                  title="Finalizar trabajo recepcional (asignar folio de acta y resultado)"
+                                >
+                                  <CheckCircle2 className="w-2.5 h-2.5 stroke-[2.5]" />
+                                  <span>Finalizar</span>
+                                </button>
+                              )}
+                              {canEditarTrabajo(estadoNombre, trabajo) && (
+                                <button
+                                  onClick={() => handleEditar(trabajo)}
+                                  className="w-16 py-0.5 rounded bg-[#f39c12] hover:bg-[#d68910] active:scale-95 text-white font-bold text-[10px] shadow-2xs transition-all cursor-pointer"
+                                  title="Editar trabajo recepcional"
+                                >
+                                  Editar
+                                </button>
+                              )}
+                              {canEliminarTrabajo(estadoNombre, trabajo) && (
+                                <button
+                                  onClick={() => handleEliminar(trabajo.Id_TrabajoR)}
+                                  className="w-16 py-0.5 rounded bg-[#e74c3c] hover:bg-[#c0392b] active:scale-95 text-white font-bold text-[10px] shadow-2xs transition-all cursor-pointer"
+                                  title="Eliminar trabajo recepcional"
+                                >
+                                  Eliminar
+                                </button>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-[10px] font-semibold text-slate-500 italic">
+                              Generado
+                            </span>
+                          )
+                        ) : estadoNombre === 'Finalizado' ? (
+                          canEditarTrabajo(estadoNombre, trabajo) ? (
+                            <div className="flex flex-col items-center gap-1 w-full">
                               <button
-                                onClick={() => handleAbrirFinalizar(trabajo)}
-                                className="w-16 py-0.5 rounded bg-[#00873e] hover:bg-[#007033] active:scale-95 text-white font-bold text-[10px] shadow-2xs transition-all cursor-pointer flex items-center justify-center gap-1 animate-fadeIn"
-                                title="Finalizar trabajo recepcional (asignar folio de acta y resultado)"
+                                onClick={() => handleEditar(trabajo)}
+                                className="w-16 py-0.5 rounded bg-[#f39c12] hover:bg-[#d68910] active:scale-95 text-white font-bold text-[10px] shadow-2xs transition-all cursor-pointer"
+                                title="Editar libro/tomo y folio"
                               >
-                                <CheckCircle2 className="w-2.5 h-2.5 stroke-[2.5]" />
-                                <span>Finalizar</span>
+                                Editar
                               </button>
-                            )}
-                            <button
-                              onClick={() => handleEditar(trabajo)}
-                              className="w-16 py-0.5 rounded bg-[#f39c12] hover:bg-[#d68910] active:scale-95 text-white font-bold text-[10px] shadow-2xs transition-all cursor-pointer"
-                              title="Editar trabajo recepcional"
-                            >
-                              Editar
-                            </button>
-                            {userIsDirectivo && (
-                              <button
-                                onClick={() => handleEliminar(trabajo.Id_TrabajoR)}
-                                className="w-16 py-0.5 rounded bg-[#e74c3c] hover:bg-[#c0392b] active:scale-95 text-white font-bold text-[10px] shadow-2xs transition-all cursor-pointer"
-                                title="Eliminar trabajo recepcional"
-                              >
-                                Eliminar
-                              </button>
-                            )}
-                          </div>
+                            </div>
+                          ) : (
+                            <span className="text-[10px] font-semibold text-slate-500 italic">
+                              Finalizado
+                            </span>
+                          )
                         ) : (
                           <span className="text-[10px] font-semibold text-slate-500 italic">
                             {estadoNombre}
@@ -567,6 +655,15 @@ export const MaestroLandingView: React.FC = () => {
         trabajoToEdit={trabajoToEdit}
         existingTrabajos={rawTrabajos}
         isLoading={isSaving}
+      />
+
+      {/* Modal Form para Generar Acta Oficial */}
+      <GenerarActaModal
+        isOpen={isGenerarActaModalOpen}
+        onClose={handleCerrarGenerarActa}
+        trabajo={trabajoParaActa}
+        onGenerar={handleGenerarActaSubmit}
+        isLoading={isGenerandoActa}
       />
 
       {/* Modal Form for Finalizar Trabajo Recepcional */}

@@ -75,11 +75,19 @@ export const TrabajoModalForm: React.FC<TrabajoModalFormProps> = ({
                 isJefeCarrera={form.isJefeCarrera}
                 carreraId={form.carreraId}
                 setCarreraId={form.setCarreraId}
+                fecha={form.fecha}
+                setFecha={form.setFecha}
+                horaInicio={form.horaInicio}
+                setHoraInicio={form.setHoraInicio}
+                horaFin={form.horaFin}
+                setHoraFin={form.setHoraFin}
                 fechaHora={form.fechaHora}
                 setFechaHora={form.setFechaHora}
                 lugarId={form.lugarId}
                 setLugarId={form.setLugarId}
                 lugarConflictivo={form.lugarConflictivo}
+                conflictoLugar={form.conflictoLugar}
+                conflictoCarrera={form.conflictoCarrera}
                 modalidad={form.modalidad}
                 setModalidad={form.setModalidad}
                 titulo={form.titulo}
@@ -125,9 +133,16 @@ export const TrabajoModalForm: React.FC<TrabajoModalFormProps> = ({
           <div className="pt-4 flex items-center justify-center gap-4 border-t border-slate-300 shrink-0">
             <button
               type="submit"
-              disabled={isLoading || !!form.lugarConflictivo || form.sinGruposPeriodoActual}
+              disabled={
+                isLoading ||
+                !!form.conflictoLugar ||
+                !!form.conflictoCarrera ||
+                !!form.lugarConflictivo ||
+                form.sinGruposPeriodoActual
+              }
               className="px-8 py-3 rounded-xl bg-[#00873e] hover:bg-[#007033] active:scale-[0.98] text-white font-bold text-sm sm:text-base shadow-md transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             >
+
               {isLoading
                 ? 'Guardando...'
                 : trabajoToEdit

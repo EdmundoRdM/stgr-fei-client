@@ -6,9 +6,10 @@ import { estudianteService } from '@/services/estudiantes/estudianteService';
 import { trabajoService, type GuardarTrabajoPayload } from '@/services/trabajos/trabajoService';
 import { cursoService } from '@/services/cursos/cursoService';
 import { useAuth } from '@/context/AuthContext';
-import { isDirectivo, isJefeCarrera, getUserCarreraId } from '@/utils/roleUtils';
+import { isDirector, isSoloProfesor, isJefeCarrera, getUserCarreraId } from '@/utils/roleUtils';
 import type { SelectOption } from '@/presentation/components/SearchableSelect';
 import type { TrabajoRecepcional } from '@/domain/models/trabajo.types';
+
 
 // Helper para formatear cualquier fecha proveniente de la API al formato estricto de datetime-local (YYYY-MM-DDTHH:mm)
 export const formatToDateTimeLocal = (fechaRaw?: string | null): string => {
@@ -29,6 +30,54 @@ export const formatToDateTimeLocal = (fechaRaw?: string | null): string => {
 
   return `${str}T09:00`;
 };
+
+// Helper para extraer fecha (YYYY-MM-DD), hora de inicio (HH:mm) y hora de fin (HH:mm)
+export const extraerFechaYHoras = (
+  fechaInicioRaw?: string | null,
+  fechaFinRaw?: string | null
+): { fecha: string; horaInicio: string; horaFin: string } => {
+  if (!fechaInicioRaw) {
+    return { fecha: '', horaInicio: '10:00', horaFin: '12:00' };
+  }
+
+  const strIni = fechaInicioRaw.trim();
+  let fecha = '';
+  let horaInicio = '10:00';
+  let horaFin = '12:00';
+
+  if (strIni.includes('T') || strIni.includes(' ')) {
+    const parts = strIni.replace(' ', 'T').split('T');
+    fecha = parts[0] || '';
+    const rawTime = (parts[1] || '').substring(0, 5);
+    if (rawTime && rawTime !== '00:00') {
+      horaInicio = rawTime;
+    }
+  } else {
+    fecha = strIni;
+  }
+
+  if (fechaFinRaw) {
+    const strFin = fechaFinRaw.trim();
+    if (strFin.includes('T') || strFin.includes(' ')) {
+      const partsFin = strFin.replace(' ', 'T').split('T');
+      const rawTimeFin = (partsFin[1] || '').substring(0, 5);
+      if (rawTimeFin && rawTimeFin !== '00:00') {
+        horaFin = rawTimeFin;
+      }
+    }
+  } else if (horaInicio) {
+    // Si no hay hora fin explícita, sugerir 2 horas después de la hora de inicio
+    const [hStr, mStr] = horaInicio.split(':');
+    const hNum = parseInt(hStr, 10);
+    if (!isNaN(hNum)) {
+      const finH = Math.min(hNum + 2, 23);
+      horaFin = `${String(finH).padStart(2, '0')}:${mStr || '00'}`;
+    }
+  }
+
+  return { fecha, horaInicio, horaFin };
+};
+
 
 // Helper para detectar contenido malicioso, inyecciones XSS o SQL
 export const detectarContenidoMalicioso = (texto: string): string | null => {
@@ -158,21 +207,28 @@ export const useTrabajoForm = ({
   existingTrabajos = [],
 }: UseTrabajoFormParams) => {
   const { user } = useAuth();
-  const esDirectivo = isDirectivo(user);
+  const esDirectorUser = isDirector(user);
+
+  const esDocenteUser = isSoloProfesor(user);
   const esJefeCarrera = isJefeCarrera(user);
   const userCarreraId = getUserCarreraId(user);
-  const esProfesorRegistrando = !esDirectivo && !trabajoToEdit;
+  // Un docente titular, el Director de la Facultad o el Jefe de Carrera (con grupo de ER) registran con base en su grupo de ER
+  const esProfesorRegistrando = (esDocenteUser || esDirectorUser || esJefeCarrera) && !trabajoToEdit;
 
   // Estado del formulario
   const [carreraId, setCarreraId] = useState<number>(userCarreraId || 1);
   const [modalidad, setModalidad] = useState<string>('Monografía');
   const [titulo, setTitulo] = useState<string>('');
+  const [fecha, setFecha] = useState<string>('');
+  const [horaInicio, setHoraInicio] = useState<string>('10:00');
+  const [horaFin, setHoraFin] = useState<string>('12:00');
   const [fechaHora, setFechaHora] = useState<string>('');
   const [lugarId, setLugarId] = useState<number>(1);
   const [folio, setFolio] = useState<string>('Pendiente');
   const [tomo, setTomo] = useState<number | undefined>(undefined);
   const [numeroFolio, setNumeroFolio] = useState<number | undefined>(undefined);
   const [resultado, setResultado] = useState<string>('Pendiente');
+
 
   // Lista de estudiantes seleccionados (soporte para múltiples estudiantes)
   const [matriculasEstudiantes, setMatriculasEstudiantes] = useState<string[]>(['']);
@@ -199,7 +255,7 @@ export const useTrabajoForm = ({
   const { data: estudiantes = [] } = useQuery({
     queryKey: ['estudiantes'],
     queryFn: () => estudianteService.getEstudiantes(),
-    enabled: isOpen && (esDirectivo || !!trabajoToEdit),
+    enabled: isOpen && (!esProfesorRegistrando || !!trabajoToEdit),
   });
 
   // Consultar grupos de Experiencia Recepcional del profesor en el periodo escolar activo
@@ -339,13 +395,18 @@ export const useTrabajoForm = ({
 
         // Formatear fecha y hora
         if (trabajoToEdit.Fecha_defensa) {
-          const rawFecha = trabajoToEdit.Fecha_defensa;
-          if (rawFecha.includes('T')) {
-            setFechaHora(rawFecha.substring(0, 16));
-          } else {
-            setFechaHora(`${rawFecha.replace(' ', 'T').substring(0, 16)}`);
-          }
+          const { fecha: pFecha, horaInicio: pHoraInicio, horaFin: pHoraFin } = extraerFechaYHoras(
+            trabajoToEdit.Fecha_defensa,
+            trabajoToEdit.Fecha_fin_defensa
+          );
+          setFecha(pFecha);
+          setHoraInicio(pHoraInicio);
+          setHoraFin(pHoraFin);
+          setFechaHora(pFecha && pHoraInicio ? `${pFecha}T${pHoraInicio}` : '');
         } else {
+          setFecha('');
+          setHoraInicio('10:00');
+          setHoraFin('12:00');
           setFechaHora('');
         }
 
@@ -369,14 +430,17 @@ export const useTrabajoForm = ({
         setModalidad('Monografía');
         setCarreraId(userCarreraId || 1);
         setLugarId(1);
+        setFecha('');
+        setHoraInicio('10:00');
+        setHoraFin('12:00');
         setFechaHora('');
         setTomo(undefined);
         setNumeroFolio(undefined);
         setFolio('Pendiente');
         setResultado('Pendiente');
         setMatriculasEstudiantes(['']);
-        // Si el usuario es docente, preasignarlo como Director del trabajo
-        const titularDirector = !esDirectivo && user?.numeroPersonal ? String(user.numeroPersonal) : undefined;
+        // Si el usuario es docente o director registrando para su grupo, preasignarlo como Director del trabajo
+        const titularDirector = (esDocenteUser || esDirectorUser) && user?.numeroPersonal ? String(user.numeroPersonal) : undefined;
         setDirectorId(titularDirector);
         setCodirectorId(undefined);
         setPresidenteId(undefined);
@@ -387,6 +451,7 @@ export const useTrabajoForm = ({
       setErrors({});
     }
   }, [isOpen, trabajoToEdit]);
+
 
   // Sincronizar participantes cuando lleguen datos de la API o cambie la lista de participantes
   useEffect(() => {
@@ -462,38 +527,131 @@ export const useTrabajoForm = ({
     );
   };
 
-  // Validación de conflicto de horario y lugar
-  const lugarConflictivo = useMemo(() => {
-    if (!fechaHora || fechaHora.length < 16 || !lugarId) return null;
+  // Validación de conflicto de horario y lugar / carrera (Regla 1 y Regla 2 del backend)
+  const { conflictoLugar, conflictoCarrera } = useMemo(() => {
+    if (!fecha || !horaInicio) {
+      return { conflictoLugar: null, conflictoCarrera: null };
+    }
 
-    const [selDate, selTime] = fechaHora.split('T');
-    if (!selDate || !selTime) return null;
+    const inicioPropuesto = new Date(`${fecha}T${horaInicio}:00`);
+    if (isNaN(inicioPropuesto.getTime())) {
+      return { conflictoLugar: null, conflictoCarrera: null };
+    }
+
+    let finPropuesto: Date;
+    if (horaFin) {
+      finPropuesto = new Date(`${fecha}T${horaFin}:00`);
+    } else {
+      finPropuesto = new Date(inicioPropuesto.getTime() + 2 * 60 * 60 * 1000);
+    }
+    if (isNaN(finPropuesto.getTime())) {
+      return { conflictoLugar: null, conflictoCarrera: null };
+    }
 
     const editId = trabajoToEdit
       ? String(trabajoToEdit.Id_TrabajoR || (trabajoToEdit as any).id || '')
       : null;
 
-    const conflicto = existingTrabajos.find((t) => {
+    let cLugar: any = null;
+    let cCarrera: any = null;
+
+    for (const t of existingTrabajos) {
       const otherId = String(t.Id_TrabajoR || (t as any).id || '');
-      if (editId && otherId && editId === otherId) {
-        return false;
-      }
+      if (editId && otherId && editId === otherId) continue;
+      if (!t.Fecha_defensa) continue;
 
+      const tInicio = new Date(t.Fecha_defensa);
+      if (isNaN(tInicio.getTime())) continue;
+
+      let tFin: Date;
+      if (t.Fecha_fin_defensa) {
+        tFin = new Date(t.Fecha_fin_defensa);
+      } else {
+        tFin = new Date(tInicio.getTime() + 2 * 60 * 60 * 1000);
+      }
+      if (isNaN(tFin.getTime())) continue;
+
+      // Condición de solapamiento de intervalos: inicioA < finB && finA > inicioB
+      const seSolapa = inicioPropuesto < tFin && finPropuesto > tInicio;
+      if (!seSolapa) continue;
+
+      const hIniStr = tInicio.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: false });
+      const hFinStr = tFin.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: false });
+
+      // 1. Conflicto de espacio físico (mismo lugar)
       const tLugarId = Number(t.Id_Lugar || t.Lugar?.Id_Lugar);
-      if (tLugarId !== Number(lugarId)) {
-        return false;
+      if (!cLugar && lugarId && tLugarId === Number(lugarId)) {
+        cLugar = {
+          trabajo: t,
+          Titulo: t.Titulo,
+          lugarNombre: t.Lugar?.Nombre || 'Recinto seleccionado',
+          horaInicio: hIniStr,
+          horaFin: hFinStr,
+        };
       }
 
-      if (!t.Fecha_defensa) return false;
+      // 2. Conflicto de carrera simultánea (misma licenciatura independientemente del salón)
+      const tCarreraId = Number(t.Id_Carrera || t.Carrera?.Id_Carrera);
+      if (!cCarrera && carreraId && tCarreraId === Number(carreraId)) {
+        cCarrera = {
+          trabajo: t,
+          Titulo: t.Titulo,
+          carreraNombre: t.Carrera?.NombreCarrera || 'la misma licenciatura',
+          lugarNombre: t.Lugar?.Nombre || 'otro recinto',
+          horaInicio: hIniStr,
+          horaFin: hFinStr,
+        };
+      }
+    }
 
-      const tFormatted = formatToDateTimeLocal(t.Fecha_defensa);
-      const [tDate, tTime] = tFormatted.split('T');
+    return { conflictoLugar: cLugar, conflictoCarrera: cCarrera };
+  }, [fecha, horaInicio, horaFin, lugarId, carreraId, existingTrabajos, trabajoToEdit]);
 
-      return tDate === selDate && tTime === selTime;
-    });
+  // Consulta opcional a la API para verificar disponibilidad y conflictos en base de datos en tiempo real
+  const { data: disponibilidadApi } = useQuery({
+    queryKey: ['disponibilidad-agenda', fecha, horaInicio, horaFin, carreraId, lugarId, trabajoToEdit?.Id_TrabajoR],
+    queryFn: () =>
+      trabajoService.consultarDisponibilidad({
+        Fecha: fecha,
+        Hora_inicio: horaInicio,
+        Hora_fin: horaFin,
+        Id_Carrera: carreraId,
+        Id_TrabajoR: trabajoToEdit?.Id_TrabajoR,
+      }),
+    enabled: Boolean(isOpen && fecha && horaInicio && horaFin && horaFin > horaInicio),
+    staleTime: 5000,
+  });
 
-    return conflicto;
-  }, [fechaHora, lugarId, existingTrabajos, trabajoToEdit]);
+  const conflictoCarreraFinal =
+    conflictoCarrera ||
+    (disponibilidadApi?.carrera && !disponibilidadApi.carrera.disponible && disponibilidadApi.carrera.conflicto
+      ? {
+          trabajo: null,
+          Titulo: disponibilidadApi.carrera.conflicto.Titulo,
+          carreraNombre: 'la misma licenciatura',
+          lugarNombre: disponibilidadApi.carrera.conflicto.Lugar,
+          horaInicio: disponibilidadApi.rangoHorario?.inicioLegible,
+          horaFin: disponibilidadApi.rangoHorario?.finLegible,
+        }
+      : null);
+
+  const conflictoLugarFinal =
+    conflictoLugar ||
+    (disponibilidadApi?.lugaresOcupados?.some((l) => l.Id_Lugar === lugarId)
+      ? {
+          trabajo: null,
+          Titulo:
+            disponibilidadApi.lugaresOcupados.find((l) => l.Id_Lugar === lugarId)?.ocupadoPor?.Titulo ||
+            'Otro trabajo recepcional',
+          lugarNombre: 'Recinto seleccionado',
+          horaInicio: disponibilidadApi.rangoHorario?.inicioLegible,
+          horaFin: disponibilidadApi.rangoHorario?.finLegible,
+        }
+      : null);
+
+  // Mantenemos lugarConflictivo para retrocompatibilidad
+  const lugarConflictivo = conflictoLugarFinal || conflictoCarreraFinal;
+
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -524,13 +682,24 @@ export const useTrabajoForm = ({
       newErrors.modalidad = 'Debe seleccionar una modalidad válida.';
     }
 
-    // 4. Fecha y Hora
-    if (!fechaHora || !fechaHora.trim()) {
-      newErrors.fechaHora = 'Debe seleccionar una fecha y hora para la defensa.';
-    } else if (isNaN(new Date(fechaHora).getTime())) {
-      newErrors.fechaHora = 'La fecha y hora seleccionada no es válida.';
-    } else if (lugarConflictivo) {
-      newErrors.lugar = `Recinto ocupado por "${lugarConflictivo.Titulo}" en esa fecha y hora.`;
+    // 4. Fecha y Horarios de defensa
+    if (!fecha || !fecha.trim()) {
+      newErrors.fecha = 'Debe seleccionar una fecha para la defensa.';
+    }
+    if (!horaInicio || !horaInicio.trim()) {
+      newErrors.horaInicio = 'Debe indicar la hora de inicio de la defensa.';
+    }
+    if (!horaFin || !horaFin.trim()) {
+      newErrors.horaFin = 'Debe indicar la hora de finalización de la defensa.';
+    } else if (horaInicio && horaFin <= horaInicio) {
+      newErrors.horaFin = 'La hora de finalización debe ser estrictamente posterior a la hora de inicio.';
+    }
+
+    if (conflictoLugarFinal) {
+      newErrors.lugar = `Recinto ocupado por "${conflictoLugarFinal.Titulo}" (${conflictoLugarFinal.horaInicio} - ${conflictoLugarFinal.horaFin}).`;
+    }
+    if (conflictoCarreraFinal) {
+      newErrors.carreraId = `Conflicto de carrera simultánea: Ya existe una defensa programada para ${conflictoCarreraFinal.carreraNombre} el mismo día de ${conflictoCarreraFinal.horaInicio} a ${conflictoCarreraFinal.horaFin}.`;
     }
 
     // 5. Lugar
@@ -629,10 +798,17 @@ export const useTrabajoForm = ({
     if (vocalId) participantes.push({ Numero_Personal: vocalId, Id_rol: 5 });
     if (sinodalId) participantes.push({ Numero_Personal: sinodalId, Id_rol: 6 });
 
+    const fechaDefensaIso = fecha && horaInicio ? `${fecha}T${horaInicio}:00` : fechaHora;
+    const fechaFinDefensaIso = fecha && horaFin ? `${fecha}T${horaFin}:00` : undefined;
+
     const payload: GuardarTrabajoPayload = {
       Titulo: trimmedTitulo,
       Modalidad: modalidad,
-      Fecha_defensa: fechaHora,
+      Fecha: fecha,
+      Hora_inicio: horaInicio,
+      Hora_fin: horaFin,
+      Fecha_defensa: fechaDefensaIso,
+      Fecha_fin_defensa: fechaFinDefensaIso,
       Id_Carrera: carreraId,
       Id_Lugar: lugarId,
       Folio: folio.trim() || 'Pendiente',
@@ -648,7 +824,7 @@ export const useTrabajoForm = ({
       onClose();
     } catch (err: any) {
       toast.error('Error al guardar el trabajo recepcional', {
-        description: err.message || 'Intente nuevamente.',
+        description: err.response?.data?.detalle || err.message || 'Intente nuevamente.',
       });
     }
   };
@@ -660,6 +836,12 @@ export const useTrabajoForm = ({
     setModalidad,
     titulo,
     setTitulo,
+    fecha,
+    setFecha,
+    horaInicio,
+    setHoraInicio,
+    horaFin,
+    setHoraFin,
     fechaHora,
     setFechaHora,
     lugarId,
@@ -691,6 +873,9 @@ export const useTrabajoForm = ({
     academicosOptions,
     estudiantesOptions,
     lugarConflictivo,
+    conflictoLugar: conflictoLugarFinal,
+    conflictoCarrera: conflictoCarreraFinal,
+    disponibilidadApi,
     isFolioResultadoLocked,
     isJefeCarrera: esJefeCarrera,
     sinGruposPeriodoActual,
@@ -703,3 +888,4 @@ export const useTrabajoForm = ({
     handleSubmit,
   };
 };
+

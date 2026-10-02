@@ -1,135 +1,151 @@
 import React, { useState, useEffect } from 'react';
 import { toast } from 'sonner';
-import { X, CheckCircle2, BookOpen, Sparkles, AlertCircle } from 'lucide-react';
+import { X, CheckCircle2, BookOpen, Sparkles, Loader2, AlertCircle } from 'lucide-react';
 import type { TrabajoRecepcional, SugerenciaFolioResponse } from '@/domain/models/trabajo.types';
 import { trabajoService } from '@/services/trabajos/trabajoService';
 
-const RESULTADOS_OPCIONES = [
-  'APROBADA POR UNANIMIDAD',
-  'APROBADA POR UNANIMIDAD CON MENCIÓN DE HONOR',
-  'APROBADA POR MAYORÍA',
-  'NO APROBADA',
-];
-
-interface FinalizarTrabajoModalProps {
+interface GenerarActaModalProps {
   isOpen: boolean;
   onClose: () => void;
   trabajo: TrabajoRecepcional | null;
-  onFinalizar: (payload: {
-    tomo?: string | number | null;
-    numeroFolio?: string | number | null;
+  onGenerar: (payload: {
+    tomo: string;
+    numeroFolio: string;
     folio: string;
-    resultado: string;
   }) => Promise<void>;
   isLoading?: boolean;
 }
 
-export const FinalizarTrabajoModal: React.FC<FinalizarTrabajoModalProps> = ({
+export const GenerarActaModal: React.FC<GenerarActaModalProps> = ({
   isOpen,
   onClose,
   trabajo,
-  onFinalizar,
+  onGenerar,
   isLoading = false,
 }) => {
-  const [tomo, setTomo] = useState<string>('');
-  const [numeroFolio, setNumeroFolio] = useState<string>('');
+  const [tomo, setTomo] = useState<string>('1');
+  const [numeroFolio, setNumeroFolio] = useState<string>('1');
   const [folio, setFolio] = useState('');
-  const [resultado, setResultado] = useState('APROBADA POR UNANIMIDAD');
   const [sugerencia, setSugerencia] = useState<SugerenciaFolioResponse | null>(null);
+  const [loadingSugerencia, setLoadingSugerencia] = useState(false);
 
-  const [errorResultado, setErrorResultado] = useState('');
+  const [errorTomo, setErrorTomo] = useState('');
+  const [errorNumeroFolio, setErrorNumeroFolio] = useState('');
+
+  const formatFolio = (t: string, f: string): string => {
+    const cleanT = t.trim();
+    const cleanF = f.trim();
+    if (!cleanT && !cleanF) return '';
+    if (cleanT && !cleanF) return `Tomo ${cleanT}`;
+    if (!cleanT && cleanF) return `Folio ${cleanF}`;
+    return `Tomo ${cleanT} - Folio ${cleanF}`;
+  };
 
   useEffect(() => {
     if (isOpen && trabajo) {
-      setResultado(
-        trabajo.Resultado && trabajo.Resultado !== 'Pendiente'
-          ? trabajo.Resultado
-          : 'APROBADA POR UNANIMIDAD'
-      );
-      setErrorResultado('');
+      setErrorTomo('');
+      setErrorNumeroFolio('');
       setSugerencia(null);
-
-      const aplicarDatosTrabajo = (t: TrabajoRecepcional) => {
-        const valTomo = t.Tomo !== undefined && t.Tomo !== null ? String(t.Tomo) : '';
-        const valFolioNum =
-          t.Numero_Folio !== undefined && t.Numero_Folio !== null ? String(t.Numero_Folio) : '';
-
-        if (valTomo) setTomo(valTomo);
-        if (valFolioNum) setNumeroFolio(valFolioNum);
-
-        if (t.Folio && t.Folio !== 'Pendiente') {
-          setFolio(t.Folio);
-        } else if (valTomo || valFolioNum) {
-          setFolio(`Tomo ${valTomo || 1} - Folio ${valFolioNum || 1}`);
-        }
-      };
-
-      // 1. Aplicar datos iniciales
-      aplicarDatosTrabajo(trabajo);
-
-      // 2. Traer datos frescos directamente de la base de datos por ID
-      trabajoService
-        .getTrabajoById(trabajo.Id_TrabajoR)
-        .then((fresco) => {
-          if (fresco) {
-            aplicarDatosTrabajo(fresco);
-          }
-        })
-        .catch((err) => {
-          console.error('Error al sincronizar datos del trabajo:', err);
-        });
 
       const idCarrera = trabajo.Id_Carrera || trabajo.Carrera?.Id_Carrera;
       if (idCarrera) {
+        setLoadingSugerencia(true);
         trabajoService
-          .getSiguienteFolio(idCarrera, trabajo.Tomo || undefined)
+          .getSiguienteFolio(idCarrera)
           .then((sug) => {
             setSugerencia(sug);
-            setTomo((prev) => (prev ? prev : String(sug.Tomo ?? 1)));
-            setNumeroFolio((prev) => (prev ? prev : String(sug.Numero_Folio ?? 1)));
-            setFolio((prev) =>
-              prev && prev !== 'Pendiente'
-                ? prev
-                : sug.FolioSugerido || `Tomo ${sug.Tomo ?? 1} - Folio ${sug.Numero_Folio ?? 1}`
-            );
+            const initTomo = sug.Tomo !== undefined && sug.Tomo !== null ? String(sug.Tomo) : '1';
+            const initNumeroFolio =
+              sug.Numero_Folio !== undefined && sug.Numero_Folio !== null
+                ? String(sug.Numero_Folio)
+                : '1';
+            setTomo(initTomo);
+            setNumeroFolio(initNumeroFolio);
+            setFolio(sug.FolioSugerido || formatFolio(initTomo, initNumeroFolio));
           })
           .catch((err) => {
-            console.error('Error al obtener estado del libro de actas:', err);
+            console.error('Error al obtener sugerencia de folio:', err);
+            const fallbackTomo = trabajo.Tomo ? String(trabajo.Tomo) : '1';
+            const fallbackNumeroFolio = trabajo.Numero_Folio ? String(trabajo.Numero_Folio) : '1';
+            setTomo(fallbackTomo);
+            setNumeroFolio(fallbackNumeroFolio);
+            setFolio(
+              trabajo.Folio && trabajo.Folio !== 'Pendiente'
+                ? trabajo.Folio
+                : formatFolio(fallbackTomo, fallbackNumeroFolio)
+            );
+          })
+          .finally(() => {
+            setLoadingSugerencia(false);
           });
+      } else {
+        const fallbackTomo = trabajo.Tomo ? String(trabajo.Tomo) : '1';
+        const fallbackNumeroFolio = trabajo.Numero_Folio ? String(trabajo.Numero_Folio) : '1';
+        setTomo(fallbackTomo);
+        setNumeroFolio(fallbackNumeroFolio);
+        setFolio(
+          trabajo.Folio && trabajo.Folio !== 'Pendiente'
+            ? trabajo.Folio
+            : formatFolio(fallbackTomo, fallbackNumeroFolio)
+        );
       }
     }
   }, [isOpen, trabajo]);
 
   if (!isOpen || !trabajo) return null;
 
+  const handleTomoChange = (val: string) => {
+    setTomo(val);
+    setFolio(formatFolio(val, numeroFolio));
+    if (!val.trim()) {
+      setErrorTomo('El Tomo es requerido');
+    } else {
+      setErrorTomo('');
+    }
+  };
+
+  const handleNumeroFolioChange = (val: string) => {
+    setNumeroFolio(val);
+    setFolio(formatFolio(tomo, val));
+    if (!val.trim()) {
+      setErrorNumeroFolio('El Número de Folio es requerido');
+    } else {
+      setErrorNumeroFolio('');
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    let hasError = false;
 
-    if (!resultado || resultado.trim() === 'Pendiente') {
-      setErrorResultado('Debe seleccionar el resultado oficial obtenido en la defensa');
-      toast.error('Debe seleccionar el resultado oficial obtenido en la defensa');
+    if (!tomo.trim()) {
+      setErrorTomo('El Tomo es requerido');
+      hasError = true;
+    } else {
+      setErrorTomo('');
+    }
+
+    if (!numeroFolio.trim()) {
+      setErrorNumeroFolio('El Número de Folio es requerido');
+      hasError = true;
+    } else {
+      setErrorNumeroFolio('');
+    }
+
+    if (hasError) {
+      toast.error('Verifique los campos de Tomo y Folio');
       return;
     }
 
-    const parsedTomo = tomo ? parseInt(tomo, 10) : trabajo.Tomo ?? 1;
-    const parsedNumeroFolio = numeroFolio ? parseInt(numeroFolio, 10) : trabajo.Numero_Folio ?? 1;
-    const finalFolio =
-      folio && folio !== 'Pendiente'
-        ? folio
-        : trabajo.Folio && trabajo.Folio !== 'Pendiente'
-          ? trabajo.Folio
-          : `Tomo ${parsedTomo} - Folio ${parsedNumeroFolio}`;
-
     try {
-      await onFinalizar({
-        tomo: parsedTomo,
-        numeroFolio: parsedNumeroFolio,
-        folio: finalFolio,
-        resultado: resultado.trim(),
+      await onGenerar({
+        tomo: tomo.trim(),
+        numeroFolio: numeroFolio.trim(),
+        folio: folio.trim() || formatFolio(tomo, numeroFolio),
       });
       onClose();
     } catch (err: any) {
-      toast.error('Error al finalizar el trabajo recepcional', {
+      toast.error('Error al generar el acta', {
         description: err.message || 'Intente nuevamente.',
       });
     }
@@ -176,11 +192,11 @@ export const FinalizarTrabajoModal: React.FC<FinalizarTrabajoModalProps> = ({
             </div>
             <div>
               <h2 className="text-lg sm:text-xl font-bold text-slate-900 tracking-tight">
-                Finalizar Trabajo Recepcional
+                Acta de trabajo generada
               </h2>
               <div className="flex items-center gap-2 mt-0.5">
                 <span className="text-[10.5px] font-semibold text-[#00873e] bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200 inline-block">
-                  Estado: Generado → Finalizado
+                  Estado: Aprobado → Generado
                 </span>
                 {carreraNombre && (
                   <span className="text-[10.5px] font-semibold text-slate-700 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-300 inline-block truncate max-w-[200px]">
@@ -219,11 +235,16 @@ export const FinalizarTrabajoModal: React.FC<FinalizarTrabajoModalProps> = ({
         </div>
 
 
-        {/* Finalize Form */}
+        {/* Generar Acta Form */}
         <form onSubmit={handleSubmit} className="space-y-4 text-left flex-1 flex flex-col justify-between">
           <div className="space-y-3.5">
-            {/* Aviso o estado del libro de actas */}
-            {sugerencia && (
+            {/* Aviso o sugerencia automática */}
+            {loadingSugerencia ? (
+              <div className="flex items-center gap-2 p-2.5 rounded-xl bg-blue-50 border border-blue-200 text-blue-700 text-xs">
+                <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                <span>Consultando el siguiente folio disponible para esta carrera...</span>
+              </div>
+            ) : sugerencia ? (
               <div className="p-3 rounded-xl bg-emerald-50/90 border border-emerald-300 text-slate-800 text-xs space-y-1">
                 <div className="flex items-center gap-1.5 font-bold text-[#00873e]">
                   <Sparkles className="w-3.5 h-3.5" />
@@ -244,17 +265,17 @@ export const FinalizarTrabajoModal: React.FC<FinalizarTrabajoModalProps> = ({
                   </p>
                 )}
               </div>
-            )}
+            ) : null}
 
-            {/* Asignación de Tomo y Número de Folio (Solo lectura - ya registrado en BD) */}
+            {/* Asignación de Tomo y Número de Folio */}
             <div className="bg-emerald-50/80 p-3.5 rounded-xl border border-emerald-300 ring-2 ring-emerald-500/20 space-y-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-1.5 text-xs sm:text-sm font-bold text-slate-800">
                   <BookOpen className="w-4 h-4 text-[#00873e]" />
                   <span>Libro y Folio de Acta:</span>
                 </div>
-                <span className="text-[10px] text-slate-500 bg-slate-200/80 px-2 py-0.5 rounded-full border border-slate-300 font-bold">
-                  Registrado en Acta
+                <span className="text-[10px] text-[#00873e] bg-white px-2 py-0.5 rounded-full border border-emerald-300 font-bold">
+                  Requerido
                 </span>
               </div>
 
@@ -267,11 +288,15 @@ export const FinalizarTrabajoModal: React.FC<FinalizarTrabajoModalProps> = ({
                   <input
                     type="text"
                     value={tomo}
-                    readOnly
-                    disabled
-                    title="Información registrada previamente al generar el acta"
-                    className="w-full rounded-lg border border-slate-300 bg-slate-100/90 px-3 py-2 text-xs sm:text-sm font-bold text-slate-700 cursor-not-allowed select-none"
+                    onChange={(e) => handleTomoChange(e.target.value)}
+                    placeholder="Ej. 1"
+                    className={`w-full rounded-lg border bg-white px-3 py-2 text-xs sm:text-sm font-bold text-slate-800 focus:outline-none focus:ring-2 ${
+                      errorTomo
+                        ? 'border-red-400 focus:ring-red-400/20'
+                        : 'border-emerald-400 focus:border-[#00873e] focus:ring-[#00873e]/20'
+                    }`}
                   />
+                  {errorTomo && <p className="text-[10.5px] font-medium text-red-600 mt-1">{errorTomo}</p>}
                 </div>
 
                 {/* Numero de Folio */}
@@ -282,11 +307,17 @@ export const FinalizarTrabajoModal: React.FC<FinalizarTrabajoModalProps> = ({
                   <input
                     type="text"
                     value={numeroFolio}
-                    readOnly
-                    disabled
-                    title="Información registrada previamente al generar el acta"
-                    className="w-full rounded-lg border border-slate-300 bg-slate-100/90 px-3 py-2 text-xs sm:text-sm font-bold text-slate-700 cursor-not-allowed select-none"
+                    onChange={(e) => handleNumeroFolioChange(e.target.value)}
+                    placeholder="Ej. 4"
+                    className={`w-full rounded-lg border bg-white px-3 py-2 text-xs sm:text-sm font-bold text-slate-800 focus:outline-none focus:ring-2 ${
+                      errorNumeroFolio
+                        ? 'border-red-400 focus:ring-red-400/20'
+                        : 'border-emerald-400 focus:border-[#00873e] focus:ring-[#00873e]/20'
+                    }`}
                   />
+                  {errorNumeroFolio && (
+                    <p className="text-[10.5px] font-medium text-red-600 mt-1">{errorNumeroFolio}</p>
+                  )}
                 </div>
               </div>
 
@@ -298,44 +329,14 @@ export const FinalizarTrabajoModal: React.FC<FinalizarTrabajoModalProps> = ({
                 <input
                   type="text"
                   readOnly
-                  disabled
                   value={folio}
+                  placeholder="Ej. Tomo 1 - Folio 4"
                   className="w-full rounded-lg border border-slate-300 bg-slate-100/90 px-3 py-1.5 text-xs font-semibold text-slate-700 cursor-not-allowed select-none"
                 />
                 <p className="text-[10px] text-slate-500 mt-1">
-                  Texto descriptivo recuperado de la base de datos generado con el acta oficial.
+                  Texto descriptivo que se imprimirá en constancias y actas oficiales.
                 </p>
               </div>
-            </div>
-
-            {/* Resultado Obtenido (Editable y requerido) */}
-            <div className="bg-emerald-50/80 p-3.5 rounded-xl border border-emerald-300 ring-2 ring-emerald-500/20">
-              <label className="block text-xs sm:text-sm font-bold text-slate-800 mb-1.5 flex items-center justify-between">
-                <span>Resultado Obtenido:</span>
-                <span className="text-[10px] text-[#00873e] bg-white px-2 py-0.5 rounded-full border border-emerald-300 font-bold">
-                  Requerido
-                </span>
-              </label>
-              <select
-                value={resultado}
-                onChange={(e) => {
-                  setResultado(e.target.value);
-                  setErrorResultado('');
-                }}
-                className={`w-full rounded-lg border bg-white px-3 py-2 text-xs sm:text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 ${errorResultado
-                    ? 'border-red-400 focus:ring-red-400/20'
-                    : 'border-emerald-400 focus:border-[#00873e] focus:ring-[#00873e]/20'
-                  }`}
-              >
-                {RESULTADOS_OPCIONES.map((res) => (
-                  <option key={res} value={res}>
-                    {res}
-                  </option>
-                ))}
-              </select>
-              {errorResultado && (
-                <p className="text-[11px] font-medium text-red-600 mt-1">{errorResultado}</p>
-              )}
             </div>
           </div>
 
@@ -343,11 +344,11 @@ export const FinalizarTrabajoModal: React.FC<FinalizarTrabajoModalProps> = ({
           <div className="pt-3 flex items-center justify-center gap-3 border-t border-slate-300">
             <button
               type="submit"
-              disabled={isLoading}
+              disabled={isLoading || loadingSugerencia}
               className="px-6 py-2.5 rounded-xl bg-[#00873e] hover:bg-[#007033] active:scale-[0.98] text-white font-bold text-xs sm:text-sm shadow-md transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
             >
               <CheckCircle2 className="w-4 h-4" />
-              <span>{isLoading ? 'Finalizando...' : 'Finalizar Trabajo'}</span>
+              <span>{isLoading ? 'Generando Acta...' : 'Generar Acta'}</span>
             </button>
 
             <button

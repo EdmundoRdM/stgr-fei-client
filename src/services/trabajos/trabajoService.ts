@@ -6,6 +6,8 @@ import type {
   EstadoTomoResponse,
   ResumenTomo,
   FinalizarTrabajoPayload,
+  HistorialEstado,
+  DisponibilidadAgendaResponse,
 } from '@/domain/models/trabajo.types';
 import { documentoService } from '@/services/documentos/documentoService';
 
@@ -13,6 +15,10 @@ export interface GuardarTrabajoPayload {
   Titulo: string;
   Modalidad: string;
   Fecha_defensa?: string;
+  Fecha_fin_defensa?: string;
+  Fecha?: string;
+  Hora_inicio?: string;
+  Hora_fin?: string;
   Id_Carrera?: number;
   Id_Lugar?: number;
   Folio?: string;
@@ -25,6 +31,7 @@ export interface GuardarTrabajoPayload {
   }>;
   matriculasEstudiantes?: string[];
 }
+
 
 export const trabajoService = {
   /**
@@ -329,4 +336,58 @@ export const trabajoService = {
     });
     return response.data;
   },
+
+  /**
+   * Consulta la disponibilidad de lugares y si la carrera está libre para una fecha y horario propuesto
+   * GET /api/trabajos/agenda/disponibilidad
+   */
+  async consultarDisponibilidad(params: {
+    Fecha?: string;
+    Hora_inicio?: string;
+    Hora_fin?: string;
+    Fecha_defensa?: string;
+    Fecha_fin_defensa?: string;
+    Id_Carrera?: number;
+    Id_TrabajoR?: number;
+  }): Promise<DisponibilidadAgendaResponse> {
+    const response = await apiClient.get<DisponibilidadAgendaResponse>(
+      '/trabajos/agenda/disponibilidad',
+      { params }
+    );
+    return response.data;
+  },
+
+  /**
+   * Programa o reprograma la fecha, horas de inicio y fin, y el lugar de la defensa
+   * POST /api/trabajos/:id/programar-defensa
+   */
+  async programarDefensa(
+    id: number,
+    payload: {
+      Fecha?: string;
+      Hora_inicio?: string;
+      Hora_fin?: string;
+      Fecha_defensa?: string;
+      Fecha_fin_defensa?: string;
+      Id_Lugar?: number;
+      Id_Carrera?: number;
+      Numero_Personal?: string | number;
+    }
+  ): Promise<{ mensaje: string; trabajo: TrabajoRecepcional }> {
+    const response = await apiClient.post<{ mensaje: string; trabajo: TrabajoRecepcional }>(
+      `/trabajos/${id}/programar-defensa`,
+      payload
+    );
+    return response.data;
+  },
+
+  /**
+   * Consulta el historial cronológico de cambios de estado del trabajo recepcional (trazabilidad)
+   * GET /api/trabajos/:id/historial-estados
+   */
+  async getHistorialEstados(id: number): Promise<HistorialEstado[]> {
+    const response = await apiClient.get<HistorialEstado[]>(`/trabajos/${id}/historial-estados`);
+    return response.data;
+  },
 };
+

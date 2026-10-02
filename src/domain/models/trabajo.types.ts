@@ -68,6 +68,7 @@ export interface TrabajoRecepcional {
   Numero_Folio?: number | null;
   Modalidad: string;
   Fecha_defensa: string;
+  Fecha_fin_defensa?: string | null;
   Resultado: string;
   Id_Carrera?: number;
   Id_Lugar?: number;
@@ -80,6 +81,48 @@ export interface TrabajoRecepcional {
   ParticipantesTrabajos?: Participante[];
   EstudianteTrabajos?: EstudianteAsignado[];
   checklistCompleto?: boolean;
+}
+
+export interface HistorialEstado {
+  Id_EstadoTrabajo: number;
+  Fecha: string;
+  Id_Estado: number;
+  Id_TrabajoR: number;
+  EstadoListum?: EstadoTrabajo;
+}
+
+export interface DisponibilidadAgendaResponse {
+  rangoHorario: {
+    inicio: string;
+    fin: string;
+    inicioLegible: string;
+    finLegible: string;
+    fechaLegible: string;
+  };
+  carrera: {
+    Id_Carrera: number | null;
+    disponible: boolean;
+    conflicto: {
+      Id_TrabajoR: number;
+      Titulo: string;
+      Lugar: string;
+      Hora_inicio: string;
+      Hora_fin: string;
+    } | null;
+  };
+  totalLugaresRegistrados: number;
+  totalLugaresDisponibles: number;
+  lugaresDisponibles: Array<{
+    Id_Lugar: number;
+    Nombre: string;
+    Edificio?: string;
+  }>;
+  lugaresOcupados: Array<{
+    Id_Lugar: number;
+    Nombre: string;
+    Edificio?: string;
+    ocupadoPor: any;
+  }>;
 }
 
 export interface SugerenciaFolioResponse {
@@ -118,3 +161,4 @@ export interface FinalizarTrabajoPayload {
   Resultado: string;
   Numero_Personal?: string | number | null;
 }
+

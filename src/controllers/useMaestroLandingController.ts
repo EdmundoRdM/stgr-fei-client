@@ -6,13 +6,24 @@ import type { TrabajoRecepcional } from '@/domain/models/trabajo.types';
 import { useAuth } from '@/context/AuthContext';
 import {
   isDirectivo,
+  isDirector,
+  isSecretaria,
   isSecretariaGrupo,
   isPersonalAdministrativo,
   isJefeCarrera,
+  isSoloProfesor,
   getUserCarreraId,
+  canRecibirDocumentos,
+  canGenerarActa,
+  canFinalizarTrabajo,
+  canValidarTrabajo,
+  canEditarTrabajo,
+  canEliminarTrabajo,
+  canRegistrarTrabajo,
 } from '@/utils/roleUtils';
 import { documentoService } from '@/services/documentos/documentoService';
 import { academicoService } from '@/services/academicos/academicoService';
+import { cursoService } from '@/services/cursos/cursoService';
 import { authService } from '@/services/auth/authService';
 import { CARRERAS_OPCIONES } from '@/presentation/views/profesor/constants/trabajoCatalogos';
 
@@ -22,9 +33,46 @@ export type SortOrder = 'asc' | 'desc';
 export const useMaestroLandingController = () => {
   const { user } = useAuth();
   const userIsDirectivo = isDirectivo(user);
+  const isDirectorUser = isDirector(user);
+  const isSecretariaUser = isSecretaria(user);
   const isSecretariaGrupoUser = isSecretariaGrupo(user);
   const isPersonalAdmin = isPersonalAdministrativo(user);
   const isJefeCarreraUser = isJefeCarrera(user);
+  const isDocenteUser = isSoloProfesor(user);
+
+  // Consultar si el docente, director o jefe de carrera tiene grupos de ER activos en el periodo actual
+  const { data: misGruposActual = [] } = useQuery({
+    queryKey: ['mis-grupos-actual-controller', user?.numeroPersonal],
+    queryFn: () => cursoService.getMisGrupos({ soloActual: true }),
+    enabled: !!user && (isDocenteUser || isDirectorUser || isJefeCarreraUser),
+  });
+
+  // Consultar todos los grupos de ER asignados al docente (todos los periodos) para identificar qué trabajos son de sus grupos
+  const { data: todosMisGrupos = [], isLoading: isLoadingTodosGrupos } = useQuery({
+    queryKey: ['todos-mis-grupos-controller', user?.numeroPersonal],
+    queryFn: () => cursoService.getMisGrupos({ soloActual: false }),
+    enabled: !!user && isDocenteUser,
+  });
+
+  // Conjunto de matrículas de estudiantes pertenecientes a los grupos de ER del profesor
+  const misMatriculasEstudiantes = useMemo(() => {
+    const set = new Set<string>();
+    todosMisGrupos.forEach((g) => {
+      (g.estudiantes || []).forEach((e) => {
+        if (e.Matricula) {
+          set.add(String(e.Matricula).trim().toUpperCase());
+        }
+      });
+    });
+    return set;
+  }, [todosMisGrupos]);
+
+  const tieneGruposERActivos = misGruposActual.length > 0;
+  const userCanRegistrar = canRegistrarTrabajo(user, tieneGruposERActivos);
+  const userCanRecibirDocumentos = canRecibirDocumentos(user);
+  const userCanGenerarActa = canGenerarActa(user);
+  const userCanFinalizarTrabajo = canFinalizarTrabajo(user);
+  const userCanValidarTrabajo = canValidarTrabajo(user);
   const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState('');
   
@@ -81,7 +129,7 @@ export const useMaestroLandingController = () => {
   // Consulta de trabajos recepcionales con participantes y alumnos desde la API
   const {
     data: trabajos = [],
-    isLoading,
+    isLoading: isLoadingTrabajos,
     isError,
     error,
     refetch,
@@ -94,6 +142,8 @@ export const useMaestroLandingController = () => {
         Id_Carrera: jefeCarreraId,
       }),
   });
+
+  const isLoading = isLoadingTrabajos || (isDocenteUser && isLoadingTodosGrupos);
 
   // Mutación para crear trabajo
   const crearMutation = useMutation({
@@ -211,10 +261,21 @@ export const useMaestroLandingController = () => {
     let result = [...trabajos];
 
     // Si el usuario es directivo o secretaria de grupo, no se deben mostrar los trabajos en estado Borrador
+    // (a menos que sea el docente titular que registró su propio borrador en su grupo de ER)
     if (isPersonalAdmin) {
-      result = result.filter(
-        (t) => (t.EstadoListum?.EstadoNombre || 'Borrador') !== 'Borrador'
-      );
+      const userNum = String(user?.numeroPersonal ?? '').trim();
+      result = result.filter((t) => {
+        const estado = t.EstadoListum?.EstadoNombre || 'Borrador';
+        if (estado !== 'Borrador') return true;
+        if (userNum) {
+          const esPropioBorrador = (t.academicos || t.ParticipantesTrabajos || []).some((p: any) => {
+            const num = String(p.Academico?.Numero_Personal ?? p.Numero_Personal ?? '').trim();
+            return num === userNum;
+          });
+          if (esPropioBorrador) return true;
+        }
+        return false;
+      });
     }
 
     // Regla de Visibilidad estricta para Jefe de Carrera:
@@ -228,6 +289,33 @@ export const useMaestroLandingController = () => {
         if (jefeCarreraNombre && t.Carrera?.NombreCarrera) {
           return t.Carrera.NombreCarrera.toLowerCase().trim() === jefeCarreraNombre.toLowerCase().trim();
         }
+        return false;
+      });
+    }
+
+    // Regla de Visibilidad estricta para Profesor:
+    // El profesor no debe ver trabajos recepcionales que sean de otros grupos de la clase de Experiencia Recepcional que no sean los suyos.
+    if (isDocenteUser) {
+      const userNum = String(user?.numeroPersonal ?? (user as any)?.Numero_Personal ?? '').trim();
+      result = result.filter((t) => {
+        // 1. Trabajos que incluyan al menos un estudiante inscrito en alguno de los grupos de ER del docente
+        const tieneEstudianteDeMiGrupo = (t.estudiantes || t.EstudianteTrabajos || []).some((e: any) => {
+          const mat = String(e.Matricula ?? e.Estudiante?.Matricula ?? '').trim().toUpperCase();
+          return mat !== '' && misMatriculasEstudiantes.has(mat);
+        });
+
+        if (tieneEstudianteDeMiGrupo) return true;
+
+        // 2. Trabajos en borrador registrados por este docente en su grupo
+        const estado = t.EstadoListum?.EstadoNombre || 'Borrador';
+        if (estado === 'Borrador' && userNum) {
+          const esPropioBorrador = (t.academicos || t.ParticipantesTrabajos || []).some((p: any) => {
+            const num = String(p.Academico?.Numero_Personal ?? p.Numero_Personal ?? '').trim();
+            return num === userNum;
+          });
+          if (esPropioBorrador) return true;
+        }
+
         return false;
       });
     }
@@ -318,7 +406,19 @@ export const useMaestroLandingController = () => {
     });
 
     return result;
-  }, [trabajos, searchTerm, sortField, sortOrder, isPersonalAdmin, isJefeCarreraUser, jefeCarreraId]);
+  }, [
+    trabajos,
+    searchTerm,
+    sortField,
+    sortOrder,
+    isPersonalAdmin,
+    isJefeCarreraUser,
+    jefeCarreraId,
+    jefeCarreraNombre,
+    isDocenteUser,
+    misMatriculasEstudiantes,
+    user?.numeroPersonal,
+  ]);
 
   // Estado del cuadro de diálogo de confirmación in-app
   const [confirmDialog, setConfirmDialog] = useState<{
@@ -424,14 +524,46 @@ export const useMaestroLandingController = () => {
     setTrabajoParaDocumentos(null);
   };
 
-  // Mutación para generar acta (CU-06)
+  // Estado del modal para generar acta (Asignación de Libro/Tomo y Folio Oficial)
+  const [isGenerarActaModalOpen, setIsGenerarActaModalOpen] = useState(false);
+  const [trabajoParaActa, setTrabajoParaActa] = useState<TrabajoRecepcional | null>(null);
+
+  const handleAbrirGenerarActa = (trabajo: TrabajoRecepcional) => {
+    setTrabajoParaActa(trabajo);
+    setIsGenerarActaModalOpen(true);
+  };
+
+  const handleCerrarGenerarActa = () => {
+    setIsGenerarActaModalOpen(false);
+    setTrabajoParaActa(null);
+  };
+
+  // Mutación para generar acta (CU-06) con asignación de Tomo y Folio
   const generarActaMutation = useMutation({
-    mutationFn: (id: number) => documentoService.generarActa(id, user?.numeroPersonal),
+    mutationFn: ({
+      id,
+      tomo,
+      numeroFolio,
+      folio,
+    }: {
+      id: number;
+      tomo?: string | number | null;
+      numeroFolio?: string | number | null;
+      folio?: string;
+    }) =>
+      documentoService.generarActa(id, {
+        tomo,
+        numeroFolio,
+        folio,
+        numeroPersonal: user?.numeroPersonal,
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['trabajos'] });
       toast.success('Acta generada exitosamente', {
-        description: 'El trabajo recepcional ha pasado al estado "Generado".',
+        description: 'El trabajo recepcional ha pasado al estado "Generado" y se asignaron el tomo y folio oficiales.',
       });
+      setIsGenerarActaModalOpen(false);
+      setTrabajoParaActa(null);
     },
     onError: (err: any) => {
       toast.error('Error al generar el acta', {
@@ -441,17 +573,20 @@ export const useMaestroLandingController = () => {
   });
 
   const handleGenerarActa = (trabajo: TrabajoRecepcional) => {
-    setConfirmDialog({
-      isOpen: true,
-      title: 'Generar Acta Oficial de Trabajo Recepcional',
-      message: `¿Confirma que el trabajo recepcional "${trabajo.Titulo}" ya cuenta con su acta generada? El estado cambiará a "Generado".`,
-      confirmText: 'Generar Acta',
-      cancelText: 'Cancelar',
-      variant: 'primary',
-      onConfirm: () => {
-        generarActaMutation.mutate(trabajo.Id_TrabajoR);
-        handleCloseConfirmDialog();
-      },
+    handleAbrirGenerarActa(trabajo);
+  };
+
+  const handleGenerarActaSubmit = async (payload: {
+    tomo: string;
+    numeroFolio: string;
+    folio: string;
+  }) => {
+    if (!trabajoParaActa) return;
+    await generarActaMutation.mutateAsync({
+      id: trabajoParaActa.Id_TrabajoR,
+      tomo: payload.tomo,
+      numeroFolio: payload.numeroFolio,
+      folio: payload.folio,
     });
   };
 
@@ -507,20 +642,30 @@ export const useMaestroLandingController = () => {
   });
 
   const handleFinalizarSubmit = async (payload: {
-    tomo?: number | null;
-    numeroFolio?: number | null;
+    tomo?: string | number | null;
+    numeroFolio?: string | number | null;
     folio: string;
     resultado: string;
   }) => {
     if (!trabajoParaFinalizar) return;
+    const tNum =
+      payload.tomo !== undefined && payload.tomo !== null && payload.tomo !== ''
+        ? Number(payload.tomo)
+        : null;
+    const fNum =
+      payload.numeroFolio !== undefined && payload.numeroFolio !== null && payload.numeroFolio !== ''
+        ? Number(payload.numeroFolio)
+        : null;
+
     await finalizarMutation.mutateAsync({
       id: trabajoParaFinalizar.Id_TrabajoR,
-      tomo: payload.tomo,
-      numeroFolio: payload.numeroFolio,
+      tomo: tNum !== null && !isNaN(tNum) ? tNum : null,
+      numeroFolio: fNum !== null && !isNaN(fNum) ? fNum : null,
       folio: payload.folio,
       resultado: payload.resultado,
     });
   };
+
 
   const handleRegistrar = () => {
     setTrabajoToEdit(null);
@@ -540,7 +685,41 @@ export const useMaestroLandingController = () => {
     }
   };
 
+  const subtituloVista = useMemo(() => {
+    if (isDirectorUser) {
+      return 'Dirección de la Facultad — Supervisión General de Trabajos Recepcionales';
+    }
+    if (isJefeCarreraUser) {
+      return jefeCarreraNombre
+        ? `Licenciatura en ${jefeCarreraNombre} — Supervisión Académica`
+        : 'Jefatura de Carrera — Supervisión Académica';
+    }
+    if (isSecretariaUser) {
+      return 'Secretaría Académica — Control Documental y Actas';
+    }
+    if (isSecretariaGrupoUser) {
+      return 'Secretaría de Grupo — Control Documental y Actas';
+    }
+    if (isDocenteUser) {
+      if (todosMisGrupos.length > 0) {
+        const nrcs = todosMisGrupos.map((g) => g.curso?.NRC).filter(Boolean).join(', ');
+        return `Experiencia Recepcional — Grupo(s) a cargo: NRC ${nrcs}`;
+      }
+      return 'Experiencia Recepcional — Sin grupos asignados en el periodo actual';
+    }
+    return 'Experiencia Recepcional';
+  }, [
+    isDirectorUser,
+    isJefeCarreraUser,
+    jefeCarreraNombre,
+    isSecretariaUser,
+    isSecretariaGrupoUser,
+    isDocenteUser,
+    todosMisGrupos,
+  ]);
+
   return {
+    subtituloVista,
     trabajos: filteredAndSortedTrabajos,
     rawTrabajos: trabajos,
     totalCount: filteredAndSortedTrabajos.length,
@@ -577,6 +756,11 @@ export const useMaestroLandingController = () => {
     trabajoToEdit,
     handleCloseModal,
     handleSaveTrabajo,
+    // Generar Acta Modal states
+    isGenerarActaModalOpen,
+    trabajoParaActa,
+    handleCerrarGenerarActa,
+    handleGenerarActaSubmit,
     // Finalizar Modal states
     isFinalizarModalOpen,
     trabajoParaFinalizar,
@@ -587,10 +771,42 @@ export const useMaestroLandingController = () => {
     confirmDialog,
     handleCloseConfirmDialog,
     userIsDirectivo,
+    isDirectorUser,
+    isSecretariaUser,
     isSecretariaGrupoUser,
     isJefeCarreraUser,
     jefeCarreraId,
     jefeCarreraNombre,
     userNumeroPersonal: user?.numeroPersonal,
+    tieneGruposERActivos,
+    userCanRegistrar,
+    userCanRecibirDocumentos,
+    userCanGenerarActa,
+    userCanFinalizarTrabajo,
+    userCanValidarTrabajo,
+    canEditarTrabajo: (estado?: string, trabajo?: TrabajoRecepcional | null) => {
+      const userNum = String(user?.numeroPersonal ?? '').trim();
+      const esPropio = !!(
+        userNum &&
+        trabajo &&
+        (trabajo.academicos || trabajo.ParticipantesTrabajos || []).some((p: any) => {
+          const num = String(p.Academico?.Numero_Personal ?? p.Numero_Personal ?? '').trim();
+          return num === userNum;
+        })
+      );
+      return canEditarTrabajo(user, estado, esPropio);
+    },
+    canEliminarTrabajo: (estado?: string, trabajo?: TrabajoRecepcional | null) => {
+      const userNum = String(user?.numeroPersonal ?? '').trim();
+      const esPropio = !!(
+        userNum &&
+        trabajo &&
+        (trabajo.academicos || trabajo.ParticipantesTrabajos || []).some((p: any) => {
+          const num = String(p.Academico?.Numero_Personal ?? p.Numero_Personal ?? '').trim();
+          return num === userNum;
+        })
+      );
+      return canEliminarTrabajo(user, estado, esPropio);
+    },
   };
 };
