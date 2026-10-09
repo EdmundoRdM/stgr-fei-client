@@ -60,6 +60,19 @@ export interface ParticipantesTrabajoResponse {
   estudiantes: EstudianteAsignado[];
 }
 
+export interface NotificacionRechazo {
+  IdMensaje: number;
+  Mensaje: string;
+  Fecha: string;
+  Id_TrabajoER: number;
+}
+
+export interface MensajeRechazoResponse {
+  Id_TrabajoR: number;
+  tieneMensajeActivo: boolean;
+  mensajeRechazo: NotificacionRechazo | null;
+}
+
 export interface TrabajoRecepcional {
   Id_TrabajoR: number;
   Titulo: string;
@@ -76,11 +89,13 @@ export interface TrabajoRecepcional {
   Carrera?: Carrera;
   Lugar?: Lugar;
   EstadoListum?: EstadoTrabajo;
+  EstadoLista?: EstadoTrabajo;
   academicos?: Participante[];
   estudiantes?: EstudianteAsignado[];
   ParticipantesTrabajos?: Participante[];
   EstudianteTrabajos?: EstudianteAsignado[];
   checklistCompleto?: boolean;
+  mensajeRechazo?: NotificacionRechazo | null;
 }
 
 export interface HistorialEstado {

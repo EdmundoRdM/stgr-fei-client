@@ -14,15 +14,18 @@ import {
   Files,
   ScrollText,
   CheckCircle2,
+  MessageSquareWarning,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useMaestroLandingController, type SortField } from '@/controllers/useMaestroLandingController';
 import { LogoUV } from '@/presentation/components/LogoUV';
 import { ConfirmDialog } from '@/presentation/components/ConfirmDialog';
 import { TrabajoModalForm } from './TrabajoModalForm';
+import { VerMotivoRechazoModal } from './VerMotivoRechazoModal';
 import { RecepcionDocumentosModal } from '../secretaria/RecepcionDocumentosModal';
 import { FinalizarTrabajoModal } from '../secretaria/FinalizarTrabajoModal';
 import { GenerarActaModal } from '../secretaria/GenerarActaModal';
+import { RechazarTrabajoModal } from '../secretaria/RechazarTrabajoModal';
 import type { TrabajoRecepcional } from '@/domain/models/trabajo.types';
 import { resolveRoleName } from '@/utils/roleUtils';
 
@@ -69,6 +72,17 @@ export const MaestroLandingView: React.FC = () => {
 
     isFinalizarModalOpen,
     trabajoParaFinalizar,
+
+    isRechazarModalOpen,
+    trabajoParaRechazar,
+    handleAbrirRechazar,
+    handleCerrarRechazar,
+    handleSolicitarConfirmacionRechazo,
+
+    isVerMotivoModalOpen,
+    trabajoParaVerMotivo,
+    handleAbrirVerMotivo,
+    handleCerrarVerMotivo,
 
     isGenerarActaModalOpen,
     trabajoParaActa,
@@ -454,44 +468,71 @@ export const MaestroLandingView: React.FC = () => {
 
                       {/* Estado (Texto en negrita directo según prototipo) */}
                       <td className="w-20 min-w-[75px] max-w-[85px] py-2 px-1 text-center border-r border-white font-bold text-[11px] text-slate-800 whitespace-nowrap">
-                        {estadoNombre}
+                        <div className="flex flex-col items-center justify-center">
+                          <span>{estadoNombre}</span>
+                          {isBorrador && trabajo.mensajeRechazo && (
+                            <span
+                              className="text-[8px] font-bold text-red-600 bg-red-100/90 px-1 py-0.5 rounded mt-0.5 border border-red-200 cursor-pointer hover:bg-red-200 transition-colors leading-tight text-center max-w-[80px]"
+                              onClick={() => handleAbrirVerMotivo(trabajo)}
+                              title="Haga clic para ver el motivo del rechazo"
+                            >
+                              Rechazado
+                            </span>
+                          )}
+                        </div>
                       </td>
 
                       {/* Opciones (RBAC para CU-01 a CU-06) */}
                       <td className="w-24 min-w-[90px] max-w-[115px] py-1.5 px-1 text-center align-middle">
                         {isBorrador ? (
-                          (canEditarTrabajo(estadoNombre, trabajo) || canEliminarTrabajo(estadoNombre, trabajo)) ? (
-                            <div className="flex flex-col items-center gap-1 w-full">
-                              {canEditarTrabajo(estadoNombre, trabajo) && (
-                                <button
-                                  onClick={() => handleEditar(trabajo)}
-                                  className="w-16 py-0.5 rounded bg-[#f39c12] hover:bg-[#d68910] active:scale-95 text-white font-bold text-[10px] shadow-2xs transition-all cursor-pointer"
-                                >
-                                  Editar
-                                </button>
-                              )}
-                              {canEliminarTrabajo(estadoNombre, trabajo) && (
-                                <button
-                                  onClick={() => handleEliminar(trabajo.Id_TrabajoR)}
-                                  className="w-16 py-0.5 rounded bg-[#e74c3c] hover:bg-[#c0392b] active:scale-95 text-white font-bold text-[10px] shadow-2xs transition-all cursor-pointer"
-                                >
-                                  Eliminar
-                                </button>
-                              )}
-                              {canEditarTrabajo(estadoNombre, trabajo) && (
-                                <button
-                                  onClick={() => handleEnviar(trabajo.Id_TrabajoR)}
-                                  className="w-16 py-0.5 rounded bg-[#3498db] hover:bg-[#2980b9] active:scale-95 text-white font-bold text-[10px] shadow-2xs transition-all cursor-pointer"
-                                >
-                                  Enviar
-                                </button>
-                              )}
-                            </div>
-                          ) : (
-                            <span className="text-[10px] font-semibold text-slate-500 italic">
-                              Borrador
-                            </span>
-                          )
+                          <div className="flex flex-col items-center gap-1 w-full">
+                            {/* Opción para consultar el motivo del rechazo para el docente */}
+                            {trabajo.mensajeRechazo && (
+                              <button
+                                onClick={() => handleAbrirVerMotivo(trabajo)}
+                                className="w-16 py-0.5 rounded bg-[#5f6c7b] hover:bg-[#475569] active:scale-95 text-white font-bold text-[10px] shadow-2xs transition-all flex items-center justify-center gap-0.5 cursor-pointer"
+                                title="Ver motivo y observaciones del rechazo"
+                              >
+                                <MessageSquareWarning className="w-2.5 h-2.5" />
+                                <span>Motivos</span>
+                              </button>
+                            )}
+
+                            {(canEditarTrabajo(estadoNombre, trabajo) || canEliminarTrabajo(estadoNombre, trabajo)) ? (
+                              <>
+                                {canEditarTrabajo(estadoNombre, trabajo) && (
+                                  <button
+                                    onClick={() => handleEditar(trabajo)}
+                                    className="w-16 py-0.5 rounded bg-[#f39c12] hover:bg-[#d68910] active:scale-95 text-white font-bold text-[10px] shadow-2xs transition-all cursor-pointer"
+                                  >
+                                    Editar
+                                  </button>
+                                )}
+                                {canEliminarTrabajo(estadoNombre, trabajo) && (
+                                  <button
+                                    onClick={() => handleEliminar(trabajo.Id_TrabajoR)}
+                                    className="w-16 py-0.5 rounded bg-[#e74c3c] hover:bg-[#c0392b] active:scale-95 text-white font-bold text-[10px] shadow-2xs transition-all cursor-pointer"
+                                  >
+                                    Eliminar
+                                  </button>
+                                )}
+                                {canEditarTrabajo(estadoNombre, trabajo) && (
+                                  <button
+                                    onClick={() => handleEnviar(trabajo.Id_TrabajoR)}
+                                    className="w-16 py-0.5 rounded bg-[#3498db] hover:bg-[#2980b9] active:scale-95 text-white font-bold text-[10px] shadow-2xs transition-all cursor-pointer"
+                                  >
+                                    Enviar
+                                  </button>
+                                )}
+                              </>
+                            ) : (
+                              !trabajo.mensajeRechazo && (
+                                <span className="text-[10px] font-semibold text-slate-500 italic">
+                                  Borrador
+                                </span>
+                              )
+                            )}
+                          </div>
                         ) : estadoNombre === 'Registrado' ? (
                           userCanValidarTrabajo ? (
                             <div className="flex flex-col items-center gap-1 w-full">
@@ -513,9 +554,9 @@ export const MaestroLandingView: React.FC = () => {
                                 <span>Aceptar</span>
                               </button>
                               <button
-                                onClick={() => handleRechazar(trabajo)}
+                                onClick={() => handleAbrirRechazar(trabajo)}
                                 className="w-16 py-0.5 rounded bg-[#e74c3c] hover:bg-[#c0392b] active:scale-95 text-white font-bold text-[10px] shadow-2xs transition-all flex items-center justify-center gap-0.5 cursor-pointer"
-                                title="Rechazar y regresar a borrador"
+                                title="Rechazar y regresar a borrador con motivo"
                               >
                                 <X className="w-2.5 h-2.5 stroke-[3]" />
                                 <span>Rechazar</span>
@@ -673,6 +714,22 @@ export const MaestroLandingView: React.FC = () => {
         trabajo={trabajoParaFinalizar}
         onFinalizar={handleFinalizarSubmit}
         isLoading={isFinalizando}
+      />
+
+      {/* Modal Form para Rechazar Trabajo Recepcional (Secretaría de Facultad) */}
+      <RechazarTrabajoModal
+        isOpen={isRechazarModalOpen}
+        onClose={handleCerrarRechazar}
+        trabajo={trabajoParaRechazar}
+        onSolicitarConfirmacion={handleSolicitarConfirmacionRechazo}
+        isLoading={isRejecting}
+      />
+
+      {/* Modal para Visualizar Motivo de Rechazo (Profesor / Docente) */}
+      <VerMotivoRechazoModal
+        isOpen={isVerMotivoModalOpen}
+        onClose={handleCerrarVerMotivo}
+        trabajo={trabajoParaVerMotivo}
       />
 
       {/* Modal de Recepción de Documentos (CU-06) */}
