@@ -221,11 +221,11 @@ export const useMaestroLandingController = () => {
 
   // Mutación para rechazar trabajo (CU-04)
   const rechazarMutation = useMutation({
-    mutationFn: ({ id, motivo }: { id: number; motivo?: string }) =>
+    mutationFn: ({ id, motivo }: { id: number; motivo: string }) =>
       trabajoService.rechazarTrabajo(id, motivo),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['trabajos'] });
-      toast.success('Trabajo regresado a borrador');
+      toast.success('Trabajo rechazado y devuelto a borrador');
     },
     onError: (err: Error) => {
       toast.error('Error al rechazar el trabajo', {
@@ -248,17 +248,23 @@ export const useMaestroLandingController = () => {
   const filteredAndSortedTrabajos = useMemo(() => {
     let result = [...trabajos];
 
-    // Si el usuario es directivo o secretaria de grupo, no se deben mostrar los trabajos en estado Borrador
-    // (a menos que sea el docente titular que registró su propio borrador en su grupo de ER)
+    // Si el usuario es directivo o secretaria, no se deben mostrar los trabajos en estado Borrador
+    // (la secretaria académica no debe ver trabajos en borrador, solo el profesor que los registró)
     if (isPersonalAdmin) {
       const userNum = String(user?.numeroPersonal ?? '').trim();
       result = result.filter((t) => {
-        const estado = t.EstadoListum?.EstadoNombre || 'Borrador';
+        const estado = t.EstadoListum?.EstadoNombre || t.EstadoLista?.EstadoNombre || 'Borrador';
+        // La Secretaria Académica y Secretaria de Grupo NUNCA deben ver trabajos en estado Borrador
+        if (isSecretariaUser || isSecretariaGrupoUser) {
+          return estado !== 'Borrador';
+        }
         if (estado !== 'Borrador') return true;
-        if (userNum) {
+        // Directores o Jefes de Carrera solo ven su propio borrador si tienen grupo de ER activo y son el director titular
+        if (tieneGruposERActivos && userNum) {
           const esPropioBorrador = (t.academicos || t.ParticipantesTrabajos || []).some((p: any) => {
             const num = String(p.Academico?.Numero_Personal ?? p.Numero_Personal ?? '').trim();
-            return num === userNum;
+            const rol = String(p.RolDeParticipacion?.NombreRol ?? p.Rol_de_participacion?.NombreRol ?? '').toLowerCase();
+            return num === userNum && rol.includes('director');
           });
           if (esPropioBorrador) return true;
         }
@@ -480,20 +486,61 @@ export const useMaestroLandingController = () => {
     });
   };
 
-  // Rechazar trabajo recepcional (CU-04)
-  const handleRechazar = (trabajo: TrabajoRecepcional) => {
+  // Estado del modal de formulario para rechazar trabajo recepcional (Secretaría)
+  const [isRechazarModalOpen, setIsRechazarModalOpen] = useState(false);
+  const [trabajoParaRechazar, setTrabajoParaRechazar] = useState<TrabajoRecepcional | null>(null);
+
+  const handleAbrirRechazar = (trabajo: TrabajoRecepcional) => {
+    setTrabajoParaRechazar(trabajo);
+    setIsRechazarModalOpen(true);
+  };
+
+  const handleCerrarRechazar = () => {
+    setIsRechazarModalOpen(false);
+    setTrabajoParaRechazar(null);
+  };
+
+  // Solicitar confirmación mediante alerta antes de ejecutar el rechazo con el motivo especificado
+  const handleSolicitarConfirmacionRechazo = (motivo: string) => {
+    if (!trabajoParaRechazar) return;
+    const trabajoActual = trabajoParaRechazar;
+
     setConfirmDialog({
       isOpen: true,
-      title: 'Rechazar trabajo',
-      message: `¿Rechazar el trabajo "${trabajo.Titulo}" y regresarlo a borrador?`,
-      confirmText: 'Rechazar',
+      title: 'Confirmar rechazo',
+      message: `¿Rechazar el trabajo "${trabajoActual.Titulo}" y devolverlo a borrador con las observaciones especificadas?`,
+      confirmText: 'Sí, rechazar',
       cancelText: 'Cancelar',
       variant: 'danger',
       onConfirm: () => {
-        rechazarMutation.mutate({ id: trabajo.Id_TrabajoR });
-        handleCloseConfirmDialog();
+        rechazarMutation.mutate(
+          { id: trabajoActual.Id_TrabajoR, motivo },
+          {
+            onSuccess: () => {
+              handleCloseConfirmDialog();
+              handleCerrarRechazar();
+            },
+            onError: () => {
+              handleCloseConfirmDialog();
+            },
+          }
+        );
       },
     });
+  };
+
+  // Estado del modal para consultar el motivo de rechazo (Profesor)
+  const [isVerMotivoModalOpen, setIsVerMotivoModalOpen] = useState(false);
+  const [trabajoParaVerMotivo, setTrabajoParaVerMotivo] = useState<TrabajoRecepcional | null>(null);
+
+  const handleAbrirVerMotivo = (trabajo: TrabajoRecepcional) => {
+    setTrabajoParaVerMotivo(trabajo);
+    setIsVerMotivoModalOpen(true);
+  };
+
+  const handleCerrarVerMotivo = () => {
+    setIsVerMotivoModalOpen(false);
+    setTrabajoParaVerMotivo(null);
   };
 
   // Estado del modal de recepción de documentos (CU-06)
@@ -718,7 +765,16 @@ export const useMaestroLandingController = () => {
     handleEditar,
     handleRegistrar,
     handleAceptar,
-    handleRechazar,
+    handleRechazar: handleAbrirRechazar,
+    handleAbrirRechazar,
+    handleCerrarRechazar,
+    handleSolicitarConfirmacionRechazo,
+    isRechazarModalOpen,
+    trabajoParaRechazar,
+    handleAbrirVerMotivo,
+    handleCerrarVerMotivo,
+    isVerMotivoModalOpen,
+    trabajoParaVerMotivo,
     handleAbrirDocumentos,
     handleCerrarDocumentos,
     handleGenerarActa,

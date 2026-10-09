@@ -8,6 +8,8 @@ import type {
   FinalizarTrabajoPayload,
   HistorialEstado,
   DisponibilidadAgendaResponse,
+  NotificacionRechazo,
+  MensajeRechazoResponse,
 } from '@/domain/models/trabajo.types';
 import { documentoService } from '@/services/documentos/documentoService';
 
@@ -254,15 +256,31 @@ export const trabajoService = {
    */
   async rechazarTrabajo(
     id: number,
-    motivo?: string
-  ): Promise<{ mensaje: string; motivo: string; trabajo: TrabajoRecepcional }> {
+    motivo: string
+  ): Promise<{
+    mensaje: string;
+    motivo: string;
+    notificacion?: NotificacionRechazo;
+    trabajo: TrabajoRecepcional;
+  }> {
     const response = await apiClient.post<{
       mensaje: string;
       motivo: string;
+      notificacion?: NotificacionRechazo;
       trabajo: TrabajoRecepcional;
     }>(`/trabajos/${id}/rechazar`, {
-      motivo: motivo || 'Corrección solicitada por Directivo',
+      motivo: motivo.trim(),
     });
+    return response.data;
+  },
+
+  /**
+   * Obtiene el mensaje de rechazo más actual para un trabajo recepcional (solo activo si está en Borrador)
+   */
+  async obtenerMensajeRechazo(
+    id: number
+  ): Promise<MensajeRechazoResponse> {
+    const response = await apiClient.get<MensajeRechazoResponse>(`/trabajos/${id}/mensaje`);
     return response.data;
   },
 
