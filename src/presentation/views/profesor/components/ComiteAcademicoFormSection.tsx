@@ -45,34 +45,44 @@ export const ComiteAcademicoFormSection: React.FC<ComiteAcademicoFormSectionProp
     return academicosOptions.filter((opt) => !validExcluded.has(String(opt.value)));
   };
 
+  // Director: no excluye Presidente (el Director puede fungir también como Presidente)
   const directorOptions = useMemo(
-    () => getOptionsExcluding([codirectorId, presidenteId, secretarioId, vocalId, sinodalId]),
-    [academicosOptions, codirectorId, presidenteId, secretarioId, vocalId, sinodalId]
+    () => getOptionsExcluding([codirectorId, secretarioId, vocalId, sinodalId]),
+    [academicosOptions, codirectorId, secretarioId, vocalId, sinodalId]
   );
 
+  // Codirector: opcional
   const codirectorOptions = useMemo(
     () => getOptionsExcluding([directorId, presidenteId, secretarioId, vocalId, sinodalId]),
     [academicosOptions, directorId, presidenteId, secretarioId, vocalId, sinodalId]
   );
 
+  // Presidente: opcional; puede ser el mismo Director o un profesor distinto
   const presidenteOptions = useMemo(
-    () => getOptionsExcluding([directorId, codirectorId, secretarioId, vocalId, sinodalId]),
-    [academicosOptions, directorId, codirectorId, secretarioId, vocalId, sinodalId]
+    () => getOptionsExcluding([codirectorId, secretarioId, vocalId, sinodalId]),
+    [academicosOptions, codirectorId, secretarioId, vocalId, sinodalId]
   );
 
+  // Secretario: obligatorio; excluye a los demás
   const secretarioOptions = useMemo(
     () => getOptionsExcluding([directorId, codirectorId, presidenteId, vocalId, sinodalId]),
     [academicosOptions, directorId, codirectorId, presidenteId, vocalId, sinodalId]
   );
 
+  // Vocal: obligatorio; excluye a los demás
   const vocalOptions = useMemo(
     () => getOptionsExcluding([directorId, codirectorId, presidenteId, secretarioId, sinodalId]),
     [academicosOptions, directorId, codirectorId, presidenteId, secretarioId, sinodalId]
   );
 
+  // Sinodal / Lector: opcional; excluye a los demás
   const sinodalOptions = useMemo(
     () => getOptionsExcluding([directorId, codirectorId, presidenteId, secretarioId, vocalId]),
     [academicosOptions, directorId, codirectorId, presidenteId, secretarioId, vocalId]
+  );
+
+  const directorEsPresidente = Boolean(
+    directorId && presidenteId && String(directorId) === String(presidenteId)
   );
 
   return (
@@ -82,7 +92,7 @@ export const ComiteAcademicoFormSection: React.FC<ComiteAcademicoFormSectionProp
           Participantes del Comité:
         </h3>
         <p className="text-[11px] text-slate-500">
-          Cada profesor solo puede desempeñar un único rol dentro del comité de este trabajo recepcional.
+          <strong>Director</strong>, <strong>Secretario</strong> y <strong>Vocal</strong> son obligatorios. El Director puede fungir también como Presidente. Codirector y Sinodal/Lector son opcionales.
         </p>
       </div>
 
@@ -93,9 +103,9 @@ export const ComiteAcademicoFormSection: React.FC<ComiteAcademicoFormSectionProp
         </div>
       )}
 
-      {/* Director */}
+      {/* Director (Obligatorio) */}
       <SearchableSelect
-        label="Director:"
+        label="Director: *"
         options={directorOptions}
         value={directorId}
         onChange={setDirectorId}
@@ -103,29 +113,49 @@ export const ComiteAcademicoFormSection: React.FC<ComiteAcademicoFormSectionProp
         error={errors.director}
       />
 
-      {/* Codirector */}
+      {/* Codirector (Opcional) */}
       <SearchableSelect
-        label="Codirector:"
+        label="Codirector (Opcional):"
         options={codirectorOptions}
         value={codirectorId}
         onChange={setCodirectorId}
-        placeholder="-- Seleccionar Codirector --"
+        placeholder="-- Seleccionar Codirector (opcional) --"
         error={errors.codirector}
       />
 
-      {/* Presidente */}
-      <SearchableSelect
-        label="Presidente:"
-        options={presidenteOptions}
-        value={presidenteId}
-        onChange={setPresidenteId}
-        placeholder="-- Seleccionar Presidente --"
-        error={errors.presidente}
-      />
+      {/* Presidente (Opcional - puede ser el Director) */}
+      <div className="space-y-1">
+        <div className="flex items-center justify-between">
+          <label className="text-xs font-semibold text-slate-700">
+            Presidente (Opcional):
+          </label>
+          {directorId && !directorEsPresidente && (
+            <button
+              type="button"
+              onClick={() => setPresidenteId(directorId)}
+              className="text-[10.5px] font-semibold text-[#003882] hover:underline cursor-pointer"
+            >
+              Asignar al Director como Presidente
+            </button>
+          )}
+          {directorEsPresidente && (
+            <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+              El Director funge como Presidente
+            </span>
+          )}
+        </div>
+        <SearchableSelect
+          options={presidenteOptions}
+          value={presidenteId}
+          onChange={setPresidenteId}
+          placeholder="-- Seleccionar Presidente (o asignar Director) --"
+          error={errors.presidente}
+        />
+      </div>
 
-      {/* Secretario */}
+      {/* Secretario (Obligatorio) */}
       <SearchableSelect
-        label="Secretario:"
+        label="Secretario: *"
         options={secretarioOptions}
         value={secretarioId}
         onChange={setSecretarioId}
@@ -133,9 +163,9 @@ export const ComiteAcademicoFormSection: React.FC<ComiteAcademicoFormSectionProp
         error={errors.secretario}
       />
 
-      {/* Vocal */}
+      {/* Vocal (Obligatorio) */}
       <SearchableSelect
-        label="Vocal:"
+        label="Vocal: *"
         options={vocalOptions}
         value={vocalId}
         onChange={setVocalId}
@@ -143,13 +173,13 @@ export const ComiteAcademicoFormSection: React.FC<ComiteAcademicoFormSectionProp
         error={errors.vocal}
       />
 
-      {/* Sinodal */}
+      {/* Sinodal / Lector (Opcional) */}
       <SearchableSelect
-        label="Sinodal:"
+        label="Sinodal / Lector (Opcional):"
         options={sinodalOptions}
         value={sinodalId}
         onChange={setSinodalId}
-        placeholder="-- Seleccionar Sinodal --"
+        placeholder="-- Seleccionar Sinodal o Lector (opcional) --"
         error={errors.sinodal}
       />
     </div>

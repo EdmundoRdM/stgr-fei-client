@@ -150,9 +150,7 @@ export const useMaestroLandingController = () => {
     mutationFn: (payload: GuardarTrabajoPayload) => trabajoService.crearTrabajo(payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['trabajos'] });
-      toast.success('Trabajo recepcional registrado', {
-        description: 'Se ha creado el borrador exitosamente con sus participantes.',
-      });
+      toast.success('Trabajo registrado correctamente');
       setIsModalOpen(false);
     },
     onError: (err: Error) => {
@@ -168,9 +166,7 @@ export const useMaestroLandingController = () => {
       trabajoService.actualizarTrabajo(id, payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['trabajos'] });
-      toast.success('Trabajo recepcional actualizado', {
-        description: 'Se han guardado las modificaciones y participantes con éxito.',
-      });
+      toast.success('Trabajo actualizado correctamente');
       setIsModalOpen(false);
       setTrabajoToEdit(null);
     },
@@ -186,9 +182,7 @@ export const useMaestroLandingController = () => {
     mutationFn: (id: number) => trabajoService.enviarAValidacion(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['trabajos'] });
-      toast.success('Trabajo enviado a revisión', {
-        description: 'El estado ha cambiado a "Registrado" y se encuentra en validación por Secretaría.',
-      });
+      toast.success('Trabajo enviado a revisión');
     },
     onError: (err: Error) => {
       toast.error('No se pudo enviar el trabajo', {
@@ -202,9 +196,7 @@ export const useMaestroLandingController = () => {
     mutationFn: (id: number) => trabajoService.eliminarTrabajo(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['trabajos'] });
-      toast.success('Trabajo eliminado', {
-        description: 'El registro ha sido eliminado exitosamente.',
-      });
+      toast.success('Trabajo eliminado');
     },
     onError: (err: Error) => {
       toast.error('No se pudo eliminar el trabajo', {
@@ -218,12 +210,10 @@ export const useMaestroLandingController = () => {
     mutationFn: (id: number) => trabajoService.validarTrabajo(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['trabajos'] });
-      toast.success('Trabajo recepcional aprobado con éxito', {
-        description: 'El registro ha pasado al estado "Aprobado".',
-      });
+      toast.success('Trabajo aprobado');
     },
     onError: (err: Error) => {
-      toast.error('Error al validar el trabajo recepcional', {
+      toast.error('Error al validar el trabajo', {
         description: err.message,
       });
     },
@@ -235,12 +225,10 @@ export const useMaestroLandingController = () => {
       trabajoService.rechazarTrabajo(id, motivo),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['trabajos'] });
-      toast.success('Trabajo recepcional rechazado', {
-        description: 'El registro ha vuelto a estado "Borrador" para corrección por el profesor.',
-      });
+      toast.success('Trabajo regresado a borrador');
     },
     onError: (err: Error) => {
-      toast.error('Error al rechazar el trabajo recepcional', {
+      toast.error('Error al rechazar el trabajo', {
         description: err.message,
       });
     },
@@ -444,10 +432,9 @@ export const useMaestroLandingController = () => {
   const handleEnviar = (id: number) => {
     setConfirmDialog({
       isOpen: true,
-      title: 'Confirmar envío a revisión',
-      message:
-        '¿Está seguro de que desea enviar este trabajo recepcional a revisión? El estado cambiará a "Registrado" y no podrá modificarse.',
-      confirmText: 'Enviar a revisión',
+      title: 'Enviar a revisión',
+      message: '¿Enviar este trabajo recepcional a revisión?',
+      confirmText: 'Enviar',
       cancelText: 'Cancelar',
       variant: 'primary',
       onConfirm: () => {
@@ -460,9 +447,8 @@ export const useMaestroLandingController = () => {
   const handleEliminar = (id: number) => {
     setConfirmDialog({
       isOpen: true,
-      title: 'Confirmar eliminación',
-      message:
-        '¿Está seguro de que desea eliminar este trabajo recepcional? Esta acción no se puede deshacer.',
+      title: 'Eliminar trabajo',
+      message: '¿Deseas eliminar este trabajo recepcional?',
       confirmText: 'Eliminar',
       cancelText: 'Cancelar',
       variant: 'danger',
@@ -482,9 +468,9 @@ export const useMaestroLandingController = () => {
   const handleAceptar = (trabajo: TrabajoRecepcional) => {
     setConfirmDialog({
       isOpen: true,
-      title: 'Validar Trabajo Recepcional',
-      message: `¿Estás seguro de que deseas aceptar el trabajo "${trabajo.Titulo}" con folio ${trabajo.Folio || 'Pendiente'}? El estado pasará a "Aprobado".`,
-      confirmText: 'Aceptar y Validar',
+      title: 'Aprobar trabajo',
+      message: `¿Aprobar el trabajo "${trabajo.Titulo}"?`,
+      confirmText: 'Aprobar',
       cancelText: 'Cancelar',
       variant: 'primary',
       onConfirm: () => {
@@ -498,9 +484,9 @@ export const useMaestroLandingController = () => {
   const handleRechazar = (trabajo: TrabajoRecepcional) => {
     setConfirmDialog({
       isOpen: true,
-      title: 'Rechazar Trabajo Recepcional',
-      message: `¿Estás seguro de que deseas rechazar el trabajo "${trabajo.Titulo}"? El registro volverá al estado "Borrador" para que el profesor responsable realice las correcciones pertinentes.`,
-      confirmText: 'Rechazar trabajo',
+      title: 'Rechazar trabajo',
+      message: `¿Rechazar el trabajo "${trabajo.Titulo}" y regresarlo a borrador?`,
+      confirmText: 'Rechazar',
       cancelText: 'Cancelar',
       variant: 'danger',
       onConfirm: () => {
@@ -559,9 +545,7 @@ export const useMaestroLandingController = () => {
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['trabajos'] });
-      toast.success('Acta generada exitosamente', {
-        description: 'El trabajo recepcional ha pasado al estado "Generado" y se asignaron el tomo y folio oficiales.',
-      });
+      toast.success('Acta generada exitosamente');
       setIsGenerarActaModalOpen(false);
       setTrabajoParaActa(null);
     },
@@ -628,9 +612,7 @@ export const useMaestroLandingController = () => {
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['trabajos'] });
-      toast.success('Trabajo recepcional finalizado con éxito', {
-        description: 'Se ha asignado el libro, folio de acta y el resultado. El estado ha cambiado a "Finalizado".',
-      });
+      toast.success('Trabajo finalizado exitosamente');
       setIsFinalizarModalOpen(false);
       setTrabajoParaFinalizar(null);
     },

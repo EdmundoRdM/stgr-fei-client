@@ -735,15 +735,9 @@ export const useTrabajoForm = ({
       }
     }
 
-    // 7. Comité Académico (Todos los roles requeridos y exclusivos)
+    // 7. Comité Académico (Director, Secretario y Vocal son obligatorios; los demás son opcionales)
     if (!directorId) {
       newErrors.director = 'Debe seleccionar al Director del comité.';
-    }
-    if (!codirectorId) {
-      newErrors.codirector = 'Debe seleccionar al Codirector del comité.';
-    }
-    if (!presidenteId) {
-      newErrors.presidente = 'Debe seleccionar al Presidente del jurado.';
     }
     if (!secretarioId) {
       newErrors.secretario = 'Debe seleccionar al Secretario del jurado.';
@@ -751,24 +745,32 @@ export const useTrabajoForm = ({
     if (!vocalId) {
       newErrors.vocal = 'Debe seleccionar al Vocal del jurado.';
     }
-    if (!sinodalId) {
-      newErrors.sinodal = 'Debe seleccionar al Sinodal del jurado.';
-    }
 
-    // Verificar exclusividad de profesores
-    const participantesSeleccionados = [
-      directorId,
-      codirectorId,
-      presidenteId,
-      secretarioId,
-      vocalId,
-      sinodalId,
-    ].filter((id): id is string | number => id !== undefined && id !== '');
+    // Verificar exclusividad de profesores:
+    // Regla: Cada rol debe ser un profesor distinto, excepto que el Director puede ser también el Presidente
+    const rolesAsignados: { rol: string; id: string | number }[] = [];
+    if (directorId) rolesAsignados.push({ rol: 'Director', id: directorId });
+    if (codirectorId) rolesAsignados.push({ rol: 'Codirector', id: codirectorId });
+    if (presidenteId) rolesAsignados.push({ rol: 'Presidente', id: presidenteId });
+    if (secretarioId) rolesAsignados.push({ rol: 'Secretario', id: secretarioId });
+    if (vocalId) rolesAsignados.push({ rol: 'Vocal', id: vocalId });
+    if (sinodalId) rolesAsignados.push({ rol: 'Sinodal/Lector', id: sinodalId });
 
-    const profesoresUnicos = new Set(participantesSeleccionados.map(String));
-    if (profesoresUnicos.size !== participantesSeleccionados.length) {
-      newErrors.comite =
-        'Un profesor no puede desempeñar múltiples roles en el mismo trabajo recepcional.';
+    for (let i = 0; i < rolesAsignados.length; i++) {
+      for (let j = i + 1; j < rolesAsignados.length; j++) {
+        const a = rolesAsignados[i];
+        const b = rolesAsignados[j];
+        if (String(a.id) === String(b.id)) {
+          const esDirectorYPresidente =
+            (a.rol === 'Director' && b.rol === 'Presidente') ||
+            (a.rol === 'Presidente' && b.rol === 'Director');
+          if (!esDirectorYPresidente) {
+            newErrors.comite = `Un profesor no puede desempeñar simultáneamente los roles de ${a.rol} y ${b.rol}.`;
+            break;
+          }
+        }
+      }
+      if (newErrors.comite) break;
     }
 
     if (!isFolioResultadoLocked) {
@@ -793,7 +795,10 @@ export const useTrabajoForm = ({
     const participantes: Array<{ Numero_Personal: string | number; Id_rol: number }> = [];
     if (directorId) participantes.push({ Numero_Personal: directorId, Id_rol: 1 });
     if (codirectorId) participantes.push({ Numero_Personal: codirectorId, Id_rol: 2 });
-    if (presidenteId) participantes.push({ Numero_Personal: presidenteId, Id_rol: 3 });
+    // Solo registrar presidente si es un profesor distinto al director para evitar duplicados en BD
+    if (presidenteId && String(presidenteId) !== String(directorId)) {
+      participantes.push({ Numero_Personal: presidenteId, Id_rol: 3 });
+    }
     if (secretarioId) participantes.push({ Numero_Personal: secretarioId, Id_rol: 4 });
     if (vocalId) participantes.push({ Numero_Personal: vocalId, Id_rol: 5 });
     if (sinodalId) participantes.push({ Numero_Personal: sinodalId, Id_rol: 6 });
