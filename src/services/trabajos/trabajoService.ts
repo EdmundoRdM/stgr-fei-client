@@ -1,14 +1,29 @@
 import { apiClient } from '@/services/api/apiClient';
-import type { TrabajoRecepcional, ParticipantesTrabajoResponse } from '@/domain/models/trabajo.types';
+import type {
+  TrabajoRecepcional,
+  ParticipantesTrabajoResponse,
+  SugerenciaFolioResponse,
+  EstadoTomoResponse,
+  ResumenTomo,
+  FinalizarTrabajoPayload,
+  HistorialEstado,
+  DisponibilidadAgendaResponse,
+} from '@/domain/models/trabajo.types';
 import { documentoService } from '@/services/documentos/documentoService';
 
 export interface GuardarTrabajoPayload {
   Titulo: string;
   Modalidad: string;
   Fecha_defensa?: string;
+  Fecha_fin_defensa?: string;
+  Fecha?: string;
+  Hora_inicio?: string;
+  Hora_fin?: string;
   Id_Carrera?: number;
   Id_Lugar?: number;
   Folio?: string;
+  Tomo?: number | null;
+  Numero_Folio?: number | null;
   Resultado?: string;
   participantes?: Array<{
     Numero_Personal: string | number;
@@ -16,6 +31,7 @@ export interface GuardarTrabajoPayload {
   }>;
   matriculasEstudiantes?: string[];
 }
+
 
 export const trabajoService = {
   /**
@@ -37,9 +53,15 @@ export const trabajoService = {
     Id_Carrera?: number;
     Id_Estado?: number;
     Modalidad?: string;
+    numeroPersonal?: string | number;
+    Numero_Personal?: string | number;
   }): Promise<TrabajoRecepcional[]> {
+    const params: Record<string, any> = { ...filtros };
+    if (filtros?.numeroPersonal && !params.Numero_Personal) {
+      params.Numero_Personal = filtros.numeroPersonal;
+    }
     const response = await apiClient.get<TrabajoRecepcional[]>('/trabajos', {
-      params: filtros,
+      params,
     });
     const listaTrabajos = response.data;
 
@@ -94,8 +116,11 @@ export const trabajoService = {
   async crearTrabajo(payload: GuardarTrabajoPayload): Promise<TrabajoRecepcional> {
     const { participantes = [], matriculasEstudiantes = [], ...datosTrabajo } = payload;
     
-    // 1. Crear el trabajo recepcional
-    const response = await apiClient.post<TrabajoRecepcional>('/trabajos', datosTrabajo);
+    // 1. Crear el trabajo recepcional enviando las matrículas para validación de ER en la API
+    const response = await apiClient.post<TrabajoRecepcional>('/trabajos', {
+      ...datosTrabajo,
+      Matriculas: matriculasEstudiantes.filter(Boolean),
+    });
     const nuevoTrabajo = response.data;
     const idTrabajo = nuevoTrabajo.Id_TrabajoR;
 
@@ -242,12 +267,12 @@ export const trabajoService = {
   },
 
   /**
-   * Finaliza un trabajo recepcional en estado Generado asignando Folio y Resultado
+   * Finaliza un trabajo recepcional en estado Generado asignando Tomo, Numero_Folio, Folio y Resultado
    * -> cambia a 'Finalizado' (Id_Estado = 5)
    */
   async finalizarTrabajo(
     id: number,
-    payload: { Folio: string; Resultado: string; Numero_Personal?: string | number | null }
+    payload: FinalizarTrabajoPayload
   ): Promise<{ mensaje: string; trabajo: TrabajoRecepcional }> {
     const numPersonalStr =
       payload.Numero_Personal !== undefined && payload.Numero_Personal !== null
@@ -256,6 +281,8 @@ export const trabajoService = {
     const response = await apiClient.post<{ mensaje: string; trabajo: TrabajoRecepcional }>(
       `/trabajos/${id}/finalizar`,
       {
+        Tomo: payload.Tomo,
+        Numero_Folio: payload.Numero_Folio,
         Folio: payload.Folio,
         Resultado: payload.Resultado,
         Numero_Personal: numPersonalStr,
@@ -266,4 +293,101 @@ export const trabajoService = {
     );
     return response.data;
   },
+
+  /**
+   * Sugiere el siguiente folio disponible para una carrera (y tomo opcional)
+   * GET /api/trabajos/siguiente-folio?Id_Carrera=...&Tomo=...
+   */
+  async getSiguienteFolio(
+    idCarrera: number,
+    tomo?: number
+  ): Promise<SugerenciaFolioResponse> {
+    const params: Record<string, any> = { Id_Carrera: idCarrera };
+    if (tomo !== undefined && tomo !== null) {
+      params.Tomo = tomo;
+    }
+    const response = await apiClient.get<SugerenciaFolioResponse>('/trabajos/siguiente-folio', {
+      params,
+    });
+    return response.data;
+  },
+
+  /**
+   * Consulta el estado de ocupación de un tomo específico de una carrera
+   * GET /api/trabajos/tomo-estado?Id_Carrera=...&Tomo=...
+   */
+  async getEstadoTomo(
+    idCarrera: number,
+    tomo: number
+  ): Promise<EstadoTomoResponse> {
+    const response = await apiClient.get<EstadoTomoResponse>('/trabajos/tomo-estado', {
+      params: { Id_Carrera: idCarrera, Tomo: tomo },
+    });
+    return response.data;
+  },
+
+  /**
+   * Lista todos los tomos registrados para una carrera con sus totales
+   * GET /api/trabajos/tomos?Id_Carrera=...
+   */
+  async getTomosPorCarrera(idCarrera: number): Promise<ResumenTomo[]> {
+    const response = await apiClient.get<ResumenTomo[]>('/trabajos/tomos', {
+      params: { Id_Carrera: idCarrera },
+    });
+    return response.data;
+  },
+
+  /**
+   * Consulta la disponibilidad de lugares y si la carrera está libre para una fecha y horario propuesto
+   * GET /api/trabajos/agenda/disponibilidad
+   */
+  async consultarDisponibilidad(params: {
+    Fecha?: string;
+    Hora_inicio?: string;
+    Hora_fin?: string;
+    Fecha_defensa?: string;
+    Fecha_fin_defensa?: string;
+    Id_Carrera?: number;
+    Id_TrabajoR?: number;
+  }): Promise<DisponibilidadAgendaResponse> {
+    const response = await apiClient.get<DisponibilidadAgendaResponse>(
+      '/trabajos/agenda/disponibilidad',
+      { params }
+    );
+    return response.data;
+  },
+
+  /**
+   * Programa o reprograma la fecha, horas de inicio y fin, y el lugar de la defensa
+   * POST /api/trabajos/:id/programar-defensa
+   */
+  async programarDefensa(
+    id: number,
+    payload: {
+      Fecha?: string;
+      Hora_inicio?: string;
+      Hora_fin?: string;
+      Fecha_defensa?: string;
+      Fecha_fin_defensa?: string;
+      Id_Lugar?: number;
+      Id_Carrera?: number;
+      Numero_Personal?: string | number;
+    }
+  ): Promise<{ mensaje: string; trabajo: TrabajoRecepcional }> {
+    const response = await apiClient.post<{ mensaje: string; trabajo: TrabajoRecepcional }>(
+      `/trabajos/${id}/programar-defensa`,
+      payload
+    );
+    return response.data;
+  },
+
+  /**
+   * Consulta el historial cronológico de cambios de estado del trabajo recepcional (trazabilidad)
+   * GET /api/trabajos/:id/historial-estados
+   */
+  async getHistorialEstados(id: number): Promise<HistorialEstado[]> {
+    const response = await apiClient.get<HistorialEstado[]>(`/trabajos/${id}/historial-estados`);
+    return response.data;
+  },
 };
+

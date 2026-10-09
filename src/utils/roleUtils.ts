@@ -58,9 +58,145 @@ export const isPersonalAdministrativo = (user?: User | null): boolean => {
 };
 
 /**
- * Determina si el usuario tiene permiso para finalizar un trabajo recepcional
+ * Determina si el usuario tiene permiso para recibir y cotejar documentos
  * (Secretaria de la Facultad / Académica y Secretaria de Grupo).
+ * El Jefe de Carrera y el Director de la Facultad NO pueden recibir documentos.
+ */
+export const canRecibirDocumentos = (user?: User | null): boolean => {
+  return isSecretaria(user) || isSecretariaGrupo(user);
+};
+
+/**
+ * Determina si el usuario tiene permiso para generar el acta oficial
+ * (Secretaria de la Facultad / Académica y Secretaria de Grupo).
+ * El Jefe de Carrera y el Director de la Facultad NO pueden generar actas.
+ */
+export const canGenerarActa = (user?: User | null): boolean => {
+  return isSecretaria(user) || isSecretariaGrupo(user);
+};
+
+/**
+ * Determina si el usuario tiene permiso para finalizar un trabajo recepcional
+ * asignando tomo, folio oficial y resultado (Secretaria de la Facultad y Secretaria de Grupo).
+ * El Jefe de Carrera y el Director de la Facultad NO pueden finalizar trabajos.
  */
 export const canFinalizarTrabajo = (user?: User | null): boolean => {
-  return isDirectivo(user) || isSecretariaGrupo(user);
+  return isSecretaria(user) || isSecretariaGrupo(user);
+};
+
+/**
+ * Determina si el usuario tiene permiso para validar (aceptar/rechazar) trabajos en estado 'Registrado'
+ * - Únicamente Secretaría de la Facultad / Académica y Secretaría de Grupo.
+ * - El Jefe de Carrera y el Director de la Facultad NO pueden validar ni rechazar (solo supervisión/lectura).
+ */
+export const canValidarTrabajo = (user?: User | null): boolean => {
+  return isSecretaria(user) || isSecretariaGrupo(user);
+};
+
+/**
+ * Determina si el usuario puede editar un trabajo recepcional según su estado y rol.
+ * - Jefe de Carrera y Director de la Facultad: NO pueden editar ningún trabajo (solo pueden ver),
+ *   a menos que sea su propio borrador si tienen grupo de ER asignado como profesor a cargo.
+ * - Profesor: únicamente su propio borrador dentro de sus grupos de ER.
+ * - Registrado, Aprobado, Generado: Secretaria de Facultad o Secretaria de Grupo.
+ * - Finalizado: Secretaria de la Facultad (para corrección de tomo/folio).
+ */
+export const canEditarTrabajo = (
+  user?: User | null,
+  estadoNombre?: string,
+  esPropioBorrador = false
+): boolean => {
+  if (!user) return false;
+  const estado = estadoNombre?.trim() || '';
+
+  // Director y Jefe de Carrera no pueden editar ningún trabajo, solo su propio borrador
+  if (isDirector(user) || isJefeCarrera(user)) {
+    return estado === 'Borrador' && esPropioBorrador;
+  }
+
+  if (estado === 'Borrador') {
+    return !isPersonalAdministrativo(user) || esPropioBorrador;
+  }
+  if (estado === 'Finalizado') {
+    return isSecretaria(user);
+  }
+  if (estado === 'Registrado' || estado === 'Aprobado' || estado === 'Generado') {
+    return isSecretaria(user) || isSecretariaGrupo(user);
+  }
+  return false;
+};
+
+/**
+ * Determina si el usuario puede eliminar un trabajo recepcional.
+ * - Jefe de Carrera y Director: NO pueden eliminar ningún trabajo, salvo su propio borrador si tienen grupo de ER.
+ * - Borrador: el profesor autor/participante de su propio borrador.
+ * - Otros estados: Secretaria de la Facultad.
+ */
+export const canEliminarTrabajo = (
+  user?: User | null,
+  estadoNombre?: string,
+  esPropioBorrador = false
+): boolean => {
+  if (!user) return false;
+  const estado = estadoNombre?.trim() || '';
+
+  // Director y Jefe de Carrera no pueden eliminar ningún trabajo, solo su propio borrador
+  if (isDirector(user) || isJefeCarrera(user)) {
+    return estado === 'Borrador' && esPropioBorrador;
+  }
+
+  if (estado === 'Borrador') {
+    return !isPersonalAdministrativo(user) || esPropioBorrador;
+  }
+  return isSecretaria(user);
+};
+
+/**
+ * Determina si el usuario tiene permitido registrar un nuevo trabajo recepcional:
+ * - Profesor, Director de la Facultad y Jefe de Carrera: SÍ, pero únicamente si están
+ *   asignados como profesor a cargo de al menos un grupo de Experiencia Recepcional activo.
+ * - Secretarias: NO (funciones de gestión y recepción documental).
+ */
+export const canRegistrarTrabajo = (user?: User | null, tieneGrupoERActivo = false): boolean => {
+  if (!user) return false;
+  if (isSoloProfesor(user) || isDirector(user) || isJefeCarrera(user)) {
+    return Boolean(tieneGrupoERActivo);
+  }
+  return false;
+};
+
+/**
+ * Obtiene el identificador numérico de la carrera vinculada al usuario (p. ej. Jefe de Carrera)
+ */
+export const getUserCarreraId = (user?: User | null): number | undefined => {
+  if (!user) return undefined;
+  const rawId =
+    user.Id_Carrera ??
+    user.idCarrera ??
+    (user as any).id_carrera ??
+    user.Carrera?.Id_Carrera ??
+    (user as any).carrera?.Id_Carrera;
+
+  if (rawId !== undefined && rawId !== null && rawId !== '') {
+    const num = Number(rawId);
+    if (!isNaN(num) && num > 0) return num;
+  }
+
+  // Detección por nombre si el backend serializó la carrera en texto
+  const text = `${user.Carrera?.NombreCarrera || ''} ${(user as any).carrera || ''} ${user.rol || ''}`.toLowerCase();
+  if (text.includes('software')) return 1;
+  if (text.includes('datos')) return 2;
+  if (text.includes('redes')) return 3;
+  if (text.includes('tecnolog') || text.includes('informacion')) return 4;
+  if (text.includes('estadist')) return 5;
+
+  // Fallback seguro por número de personal para Jefes de Carrera en plantilla docente
+  const numPersonal = String(user.numeroPersonal ?? (user as any).Numero_Personal ?? '').trim();
+  if (numPersonal === '0004' || numPersonal === '0003' || numPersonal === '0007') return 1; // Ingeniería de Software
+  if (numPersonal === '0008') return 2; // Ciencia de Datos
+  if (numPersonal === '0009' || numPersonal === '0010') return 3; // Redes y Servicios de Cómputo
+  if (numPersonal === '0005') return 4; // Tecnologías de la Información
+  if (numPersonal === '0006') return 5; // Estadística
+
+  return undefined;
 };

@@ -14,15 +14,20 @@ export const authService = {
    * Cierra la sesión activa en el cliente
    */
   logout(): void {
+    sessionStorage.removeItem('sgtr_user');
     localStorage.removeItem('sgtr_user');
   },
 
   /**
-   * Obtiene la información del usuario en sesión desde el almacenamiento local
+   * Obtiene la información del usuario en sesión desde sessionStorage
    */
   getStoredUser(): AuthResponse['usuario'] | null {
     try {
-      const stored = localStorage.getItem('sgtr_user');
+      // Limpiar remanente previo en localStorage si existe para evitar auto-logins no deseados
+      if (localStorage.getItem('sgtr_user')) {
+        localStorage.removeItem('sgtr_user');
+      }
+      const stored = sessionStorage.getItem('sgtr_user');
       return stored ? JSON.parse(stored) : null;
     } catch {
       return null;
@@ -30,9 +35,10 @@ export const authService = {
   },
 
   /**
-   * Guarda el usuario en el almacenamiento local
+   * Guarda el usuario en el almacenamiento de sesión (sessionStorage)
    */
   setStoredUser(usuario: AuthResponse['usuario']): void {
-    localStorage.setItem('sgtr_user', JSON.stringify(usuario));
+    sessionStorage.setItem('sgtr_user', JSON.stringify(usuario));
+    localStorage.removeItem('sgtr_user');
   },
 };

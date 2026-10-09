@@ -67,16 +67,30 @@ export const documentoService = {
   },
 
   /**
-   * Genera el acta oficial del trabajo recepcional (CU-06) tras cumplir el 100% de la documentación
+   * Genera el acta oficial del trabajo recepcional (CU-06) tras cumplir el 100% de la documentación,
+   * asignando el libro/tomo y folio oficial en ese momento.
    */
   async generarActa(
     idTrabajo: number,
-    numeroPersonal?: string | number | null
+    payload?: {
+      tomo?: string | number | null;
+      numeroFolio?: string | number | null;
+      folio?: string;
+      numeroPersonal?: string | number | null;
+    }
   ): Promise<{ mensaje: string; trabajo: TrabajoRecepcional }> {
-    const numPersonalStr = numeroPersonal !== undefined && numeroPersonal !== null ? String(numeroPersonal) : undefined;
+    const numPersonalStr =
+      payload?.numeroPersonal !== undefined && payload?.numeroPersonal !== null
+        ? String(payload.numeroPersonal)
+        : undefined;
     const response = await apiClient.post<{ mensaje: string; trabajo: TrabajoRecepcional }>(
       `/trabajos/${idTrabajo}/generar-acta`,
-      { Numero_Personal: numPersonalStr },
+      {
+        Tomo: payload?.tomo,
+        Numero_Folio: payload?.numeroFolio,
+        Folio: payload?.folio,
+        Numero_Personal: numPersonalStr,
+      },
       {
         headers: numPersonalStr ? { 'x-numero-personal': numPersonalStr } : {},
       }

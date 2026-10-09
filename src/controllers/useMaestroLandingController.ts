@@ -1,11 +1,31 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { trabajoService, type GuardarTrabajoPayload } from '@/services/trabajos/trabajoService';
 import type { TrabajoRecepcional } from '@/domain/models/trabajo.types';
 import { useAuth } from '@/context/AuthContext';
-import { isDirectivo, isSecretariaGrupo, isPersonalAdministrativo } from '@/utils/roleUtils';
+import {
+  isDirectivo,
+  isDirector,
+  isSecretaria,
+  isSecretariaGrupo,
+  isPersonalAdministrativo,
+  isJefeCarrera,
+  isSoloProfesor,
+  getUserCarreraId,
+  canRecibirDocumentos,
+  canGenerarActa,
+  canFinalizarTrabajo,
+  canValidarTrabajo,
+  canEditarTrabajo,
+  canEliminarTrabajo,
+  canRegistrarTrabajo,
+} from '@/utils/roleUtils';
 import { documentoService } from '@/services/documentos/documentoService';
+import { academicoService } from '@/services/academicos/academicoService';
+import { cursoService } from '@/services/cursos/cursoService';
+import { authService } from '@/services/auth/authService';
+import { CARRERAS_OPCIONES } from '@/presentation/views/profesor/constants/trabajoCatalogos';
 
 export type SortField = 'folio' | 'modalidad' | 'fecha';
 export type SortOrder = 'asc' | 'desc';
@@ -13,10 +33,90 @@ export type SortOrder = 'asc' | 'desc';
 export const useMaestroLandingController = () => {
   const { user } = useAuth();
   const userIsDirectivo = isDirectivo(user);
+  const isDirectorUser = isDirector(user);
+  const isSecretariaUser = isSecretaria(user);
   const isSecretariaGrupoUser = isSecretariaGrupo(user);
   const isPersonalAdmin = isPersonalAdministrativo(user);
+  const isJefeCarreraUser = isJefeCarrera(user);
+  const isDocenteUser = isSoloProfesor(user);
+
+  // Consultar si el docente, director o jefe de carrera tiene grupos de ER activos en el periodo actual
+  const { data: misGruposActual = [] } = useQuery({
+    queryKey: ['mis-grupos-actual-controller', user?.numeroPersonal],
+    queryFn: () => cursoService.getMisGrupos({ soloActual: true }),
+    enabled: !!user && (isDocenteUser || isDirectorUser || isJefeCarreraUser),
+  });
+
+  // Consultar todos los grupos de ER asignados al docente (todos los periodos) para identificar qué trabajos son de sus grupos
+  const { data: todosMisGrupos = [], isLoading: isLoadingTodosGrupos } = useQuery({
+    queryKey: ['todos-mis-grupos-controller', user?.numeroPersonal],
+    queryFn: () => cursoService.getMisGrupos({ soloActual: false }),
+    enabled: !!user && isDocenteUser,
+  });
+
+  // Conjunto de matrículas de estudiantes pertenecientes a los grupos de ER del profesor
+  const misMatriculasEstudiantes = useMemo(() => {
+    const set = new Set<string>();
+    todosMisGrupos.forEach((g) => {
+      (g.estudiantes || []).forEach((e) => {
+        if (e.Matricula) {
+          set.add(String(e.Matricula).trim().toUpperCase());
+        }
+      });
+    });
+    return set;
+  }, [todosMisGrupos]);
+
+  const tieneGruposERActivos = misGruposActual.length > 0;
+  const userCanRegistrar = canRegistrarTrabajo(user, tieneGruposERActivos);
+  const userCanRecibirDocumentos = canRecibirDocumentos(user);
+  const userCanGenerarActa = canGenerarActa(user);
+  const userCanFinalizarTrabajo = canFinalizarTrabajo(user);
+  const userCanValidarTrabajo = canValidarTrabajo(user);
   const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState('');
+  
+  // Cargar lista de académicos registrados para resolver Id_Carrera del Jefe de Carrera si no está en sesión
+  const { data: academicos = [] } = useQuery({
+    queryKey: ['academicos'],
+    queryFn: () => academicoService.getAcademicos(),
+    enabled: isJefeCarreraUser,
+  });
+
+  // Determinar Id_Carrera para el usuario Jefe de Carrera
+  const jefeCarreraId = useMemo(() => {
+    if (!isJefeCarreraUser) return undefined;
+    const directId = getUserCarreraId(user);
+    if (directId) return directId;
+
+    const currentNum =
+      user?.numeroPersonal !== undefined && user?.numeroPersonal !== null
+        ? String(user.numeroPersonal)
+        : undefined;
+    if (currentNum && academicos.length > 0) {
+      const match = academicos.find(
+        (a: any) => String(a.Numero_Personal ?? a.numeroPersonal) === currentNum
+      );
+      if (match?.Id_Carrera) {
+        return Number(match.Id_Carrera);
+      }
+    }
+    return undefined;
+  }, [isJefeCarreraUser, user, academicos]);
+
+  // Si se encontró el Id_Carrera pero no estaba almacenado en sesión, sincronizarlo
+  useEffect(() => {
+    if (jefeCarreraId && user && (!(user as any).Id_Carrera || !(user as any).idCarrera)) {
+      const updatedUser = { ...user, Id_Carrera: jefeCarreraId, idCarrera: jefeCarreraId };
+      authService.setStoredUser(updatedUser);
+    }
+  }, [jefeCarreraId, user]);
+
+  const jefeCarreraNombre = useMemo(() => {
+    if (!jefeCarreraId) return null;
+    const opt = CARRERAS_OPCIONES.find((c) => c.id === jefeCarreraId);
+    return opt?.nombre || null;
+  }, [jefeCarreraId]);
   
   // Estado del modal de registro/edición
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -29,23 +129,28 @@ export const useMaestroLandingController = () => {
   // Consulta de trabajos recepcionales con participantes y alumnos desde la API
   const {
     data: trabajos = [],
-    isLoading,
+    isLoading: isLoadingTrabajos,
     isError,
     error,
     refetch,
   } = useQuery({
-    queryKey: ['trabajos'],
-    queryFn: () => trabajoService.getTrabajos(),
+    queryKey: ['trabajos', user?.numeroPersonal, jefeCarreraId],
+    queryFn: () =>
+      trabajoService.getTrabajos({
+        numeroPersonal: user?.numeroPersonal,
+        Numero_Personal: user?.numeroPersonal,
+        Id_Carrera: jefeCarreraId,
+      }),
   });
+
+  const isLoading = isLoadingTrabajos || (isDocenteUser && isLoadingTodosGrupos);
 
   // Mutación para crear trabajo
   const crearMutation = useMutation({
     mutationFn: (payload: GuardarTrabajoPayload) => trabajoService.crearTrabajo(payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['trabajos'] });
-      toast.success('Trabajo recepcional registrado', {
-        description: 'Se ha creado el borrador exitosamente con sus participantes.',
-      });
+      toast.success('Trabajo registrado correctamente');
       setIsModalOpen(false);
     },
     onError: (err: Error) => {
@@ -61,9 +166,7 @@ export const useMaestroLandingController = () => {
       trabajoService.actualizarTrabajo(id, payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['trabajos'] });
-      toast.success('Trabajo recepcional actualizado', {
-        description: 'Se han guardado las modificaciones y participantes con éxito.',
-      });
+      toast.success('Trabajo actualizado correctamente');
       setIsModalOpen(false);
       setTrabajoToEdit(null);
     },
@@ -79,9 +182,7 @@ export const useMaestroLandingController = () => {
     mutationFn: (id: number) => trabajoService.enviarAValidacion(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['trabajos'] });
-      toast.success('Trabajo enviado a revisión', {
-        description: 'El estado ha cambiado a "Registrado" y se encuentra en validación por Secretaría.',
-      });
+      toast.success('Trabajo enviado a revisión');
     },
     onError: (err: Error) => {
       toast.error('No se pudo enviar el trabajo', {
@@ -95,9 +196,7 @@ export const useMaestroLandingController = () => {
     mutationFn: (id: number) => trabajoService.eliminarTrabajo(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['trabajos'] });
-      toast.success('Trabajo eliminado', {
-        description: 'El registro ha sido eliminado exitosamente.',
-      });
+      toast.success('Trabajo eliminado');
     },
     onError: (err: Error) => {
       toast.error('No se pudo eliminar el trabajo', {
@@ -111,12 +210,10 @@ export const useMaestroLandingController = () => {
     mutationFn: (id: number) => trabajoService.validarTrabajo(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['trabajos'] });
-      toast.success('Trabajo recepcional aprobado con éxito', {
-        description: 'El registro ha pasado al estado "Aprobado".',
-      });
+      toast.success('Trabajo aprobado');
     },
     onError: (err: Error) => {
-      toast.error('Error al validar el trabajo recepcional', {
+      toast.error('Error al validar el trabajo', {
         description: err.message,
       });
     },
@@ -128,12 +225,10 @@ export const useMaestroLandingController = () => {
       trabajoService.rechazarTrabajo(id, motivo),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['trabajos'] });
-      toast.success('Trabajo recepcional rechazado', {
-        description: 'El registro ha vuelto a estado "Borrador" para corrección por el profesor.',
-      });
+      toast.success('Trabajo regresado a borrador');
     },
     onError: (err: Error) => {
-      toast.error('Error al rechazar el trabajo recepcional', {
+      toast.error('Error al rechazar el trabajo', {
         description: err.message,
       });
     },
@@ -154,10 +249,63 @@ export const useMaestroLandingController = () => {
     let result = [...trabajos];
 
     // Si el usuario es directivo o secretaria de grupo, no se deben mostrar los trabajos en estado Borrador
+    // (a menos que sea el docente titular que registró su propio borrador en su grupo de ER)
     if (isPersonalAdmin) {
-      result = result.filter(
-        (t) => (t.EstadoListum?.EstadoNombre || 'Borrador') !== 'Borrador'
-      );
+      const userNum = String(user?.numeroPersonal ?? '').trim();
+      result = result.filter((t) => {
+        const estado = t.EstadoListum?.EstadoNombre || 'Borrador';
+        if (estado !== 'Borrador') return true;
+        if (userNum) {
+          const esPropioBorrador = (t.academicos || t.ParticipantesTrabajos || []).some((p: any) => {
+            const num = String(p.Academico?.Numero_Personal ?? p.Numero_Personal ?? '').trim();
+            return num === userNum;
+          });
+          if (esPropioBorrador) return true;
+        }
+        return false;
+      });
+    }
+
+    // Regla de Visibilidad estricta para Jefe de Carrera:
+    // Solo puede ver los trabajos pertenecientes a su licenciatura (Id_Carrera)
+    if (isJefeCarreraUser && jefeCarreraId) {
+      result = result.filter((t) => {
+        const carreraIdTrabajo = t.Id_Carrera || t.Carrera?.Id_Carrera;
+        if (carreraIdTrabajo !== undefined && carreraIdTrabajo !== null) {
+          return Number(carreraIdTrabajo) === Number(jefeCarreraId);
+        }
+        if (jefeCarreraNombre && t.Carrera?.NombreCarrera) {
+          return t.Carrera.NombreCarrera.toLowerCase().trim() === jefeCarreraNombre.toLowerCase().trim();
+        }
+        return false;
+      });
+    }
+
+    // Regla de Visibilidad estricta para Profesor:
+    // El profesor no debe ver trabajos recepcionales que sean de otros grupos de la clase de Experiencia Recepcional que no sean los suyos.
+    if (isDocenteUser) {
+      const userNum = String(user?.numeroPersonal ?? (user as any)?.Numero_Personal ?? '').trim();
+      result = result.filter((t) => {
+        // 1. Trabajos que incluyan al menos un estudiante inscrito en alguno de los grupos de ER del docente
+        const tieneEstudianteDeMiGrupo = (t.estudiantes || t.EstudianteTrabajos || []).some((e: any) => {
+          const mat = String(e.Matricula ?? e.Estudiante?.Matricula ?? '').trim().toUpperCase();
+          return mat !== '' && misMatriculasEstudiantes.has(mat);
+        });
+
+        if (tieneEstudianteDeMiGrupo) return true;
+
+        // 2. Trabajos en borrador registrados por este docente en su grupo
+        const estado = t.EstadoListum?.EstadoNombre || 'Borrador';
+        if (estado === 'Borrador' && userNum) {
+          const esPropioBorrador = (t.academicos || t.ParticipantesTrabajos || []).some((p: any) => {
+            const num = String(p.Academico?.Numero_Personal ?? p.Numero_Personal ?? '').trim();
+            return num === userNum;
+          });
+          if (esPropioBorrador) return true;
+        }
+
+        return false;
+      });
     }
 
     // 1. Filtrado por término de búsqueda
@@ -167,7 +315,12 @@ export const useMaestroLandingController = () => {
         const matchTitulo = t.Titulo?.toLowerCase().includes(term);
         const matchCarrera = t.Carrera?.NombreCarrera?.toLowerCase().includes(term);
         const matchModalidad = t.Modalidad?.toLowerCase().includes(term);
-        const matchFolio = t.Folio?.toLowerCase().includes(term);
+        const matchFolio =
+          t.Folio?.toLowerCase().includes(term) ||
+          (t.Tomo !== undefined && t.Tomo !== null && `tomo ${t.Tomo}`.includes(term)) ||
+          (t.Numero_Folio !== undefined && t.Numero_Folio !== null && `folio ${t.Numero_Folio}`.includes(term)) ||
+          (t.Tomo !== undefined && t.Tomo !== null && String(t.Tomo) === term) ||
+          (t.Numero_Folio !== undefined && t.Numero_Folio !== null && String(t.Numero_Folio) === term);
         const matchEstado = t.EstadoListum?.EstadoNombre?.toLowerCase().includes(term);
         
         // Búsqueda en estudiantes
@@ -204,6 +357,18 @@ export const useMaestroLandingController = () => {
       }
 
       if (sortField === 'folio') {
+        // Ordenamiento jerárquico por Tomo y Número de Folio
+        const tomoA = a.Tomo ?? (a.Folio?.toLowerCase().includes('tomo') ? parseInt(a.Folio.replace(/[^0-9]/g, ''), 10) : 0);
+        const tomoB = b.Tomo ?? (b.Folio?.toLowerCase().includes('tomo') ? parseInt(b.Folio.replace(/[^0-9]/g, ''), 10) : 0);
+        const numFolioA = a.Numero_Folio ?? 0;
+        const numFolioB = b.Numero_Folio ?? 0;
+
+        if (tomoA || tomoB || numFolioA || numFolioB) {
+          const scoreA = (tomoA || 0) * 1000 + (numFolioA || 0);
+          const scoreB = (tomoB || 0) * 1000 + (numFolioB || 0);
+          return sortOrder === 'asc' ? scoreA - scoreB : scoreB - scoreA;
+        }
+
         const valA = (a.Folio || '').trim();
         const valB = (b.Folio || '').trim();
         
@@ -229,7 +394,19 @@ export const useMaestroLandingController = () => {
     });
 
     return result;
-  }, [trabajos, searchTerm, sortField, sortOrder, isPersonalAdmin]);
+  }, [
+    trabajos,
+    searchTerm,
+    sortField,
+    sortOrder,
+    isPersonalAdmin,
+    isJefeCarreraUser,
+    jefeCarreraId,
+    jefeCarreraNombre,
+    isDocenteUser,
+    misMatriculasEstudiantes,
+    user?.numeroPersonal,
+  ]);
 
   // Estado del cuadro de diálogo de confirmación in-app
   const [confirmDialog, setConfirmDialog] = useState<{
@@ -255,10 +432,9 @@ export const useMaestroLandingController = () => {
   const handleEnviar = (id: number) => {
     setConfirmDialog({
       isOpen: true,
-      title: 'Confirmar envío a revisión',
-      message:
-        '¿Está seguro de que desea enviar este trabajo recepcional a revisión? El estado cambiará a "Registrado" y no podrá modificarse.',
-      confirmText: 'Enviar a revisión',
+      title: 'Enviar a revisión',
+      message: '¿Enviar este trabajo recepcional a revisión?',
+      confirmText: 'Enviar',
       cancelText: 'Cancelar',
       variant: 'primary',
       onConfirm: () => {
@@ -271,9 +447,8 @@ export const useMaestroLandingController = () => {
   const handleEliminar = (id: number) => {
     setConfirmDialog({
       isOpen: true,
-      title: 'Confirmar eliminación',
-      message:
-        '¿Está seguro de que desea eliminar este trabajo recepcional? Esta acción no se puede deshacer.',
+      title: 'Eliminar trabajo',
+      message: '¿Deseas eliminar este trabajo recepcional?',
       confirmText: 'Eliminar',
       cancelText: 'Cancelar',
       variant: 'danger',
@@ -293,9 +468,9 @@ export const useMaestroLandingController = () => {
   const handleAceptar = (trabajo: TrabajoRecepcional) => {
     setConfirmDialog({
       isOpen: true,
-      title: 'Validar Trabajo Recepcional',
-      message: `¿Estás seguro de que deseas aceptar el trabajo "${trabajo.Titulo}" con folio ${trabajo.Folio || 'Pendiente'}? El estado pasará a "Aprobado".`,
-      confirmText: 'Aceptar y Validar',
+      title: 'Aprobar trabajo',
+      message: `¿Aprobar el trabajo "${trabajo.Titulo}"?`,
+      confirmText: 'Aprobar',
       cancelText: 'Cancelar',
       variant: 'primary',
       onConfirm: () => {
@@ -309,9 +484,9 @@ export const useMaestroLandingController = () => {
   const handleRechazar = (trabajo: TrabajoRecepcional) => {
     setConfirmDialog({
       isOpen: true,
-      title: 'Rechazar Trabajo Recepcional',
-      message: `¿Estás seguro de que deseas rechazar el trabajo "${trabajo.Titulo}"? El registro volverá al estado "Borrador" para que el profesor responsable realice las correcciones pertinentes.`,
-      confirmText: 'Rechazar trabajo',
+      title: 'Rechazar trabajo',
+      message: `¿Rechazar el trabajo "${trabajo.Titulo}" y regresarlo a borrador?`,
+      confirmText: 'Rechazar',
       cancelText: 'Cancelar',
       variant: 'danger',
       onConfirm: () => {
@@ -335,14 +510,44 @@ export const useMaestroLandingController = () => {
     setTrabajoParaDocumentos(null);
   };
 
-  // Mutación para generar acta (CU-06)
+  // Estado del modal para generar acta (Asignación de Libro/Tomo y Folio Oficial)
+  const [isGenerarActaModalOpen, setIsGenerarActaModalOpen] = useState(false);
+  const [trabajoParaActa, setTrabajoParaActa] = useState<TrabajoRecepcional | null>(null);
+
+  const handleAbrirGenerarActa = (trabajo: TrabajoRecepcional) => {
+    setTrabajoParaActa(trabajo);
+    setIsGenerarActaModalOpen(true);
+  };
+
+  const handleCerrarGenerarActa = () => {
+    setIsGenerarActaModalOpen(false);
+    setTrabajoParaActa(null);
+  };
+
+  // Mutación para generar acta (CU-06) con asignación de Tomo y Folio
   const generarActaMutation = useMutation({
-    mutationFn: (id: number) => documentoService.generarActa(id, user?.numeroPersonal),
+    mutationFn: ({
+      id,
+      tomo,
+      numeroFolio,
+      folio,
+    }: {
+      id: number;
+      tomo?: string | number | null;
+      numeroFolio?: string | number | null;
+      folio?: string;
+    }) =>
+      documentoService.generarActa(id, {
+        tomo,
+        numeroFolio,
+        folio,
+        numeroPersonal: user?.numeroPersonal,
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['trabajos'] });
-      toast.success('Acta generada exitosamente', {
-        description: 'El trabajo recepcional ha pasado al estado "Generado".',
-      });
+      toast.success('Acta generada exitosamente');
+      setIsGenerarActaModalOpen(false);
+      setTrabajoParaActa(null);
     },
     onError: (err: any) => {
       toast.error('Error al generar el acta', {
@@ -352,17 +557,20 @@ export const useMaestroLandingController = () => {
   });
 
   const handleGenerarActa = (trabajo: TrabajoRecepcional) => {
-    setConfirmDialog({
-      isOpen: true,
-      title: 'Generar Acta Oficial de Trabajo Recepcional',
-      message: `¿Confirma que el trabajo recepcional "${trabajo.Titulo}" ya cuenta con su acta generada? El estado cambiará a "Generado".`,
-      confirmText: 'Generar Acta',
-      cancelText: 'Cancelar',
-      variant: 'primary',
-      onConfirm: () => {
-        generarActaMutation.mutate(trabajo.Id_TrabajoR);
-        handleCloseConfirmDialog();
-      },
+    handleAbrirGenerarActa(trabajo);
+  };
+
+  const handleGenerarActaSubmit = async (payload: {
+    tomo: string;
+    numeroFolio: string;
+    folio: string;
+  }) => {
+    if (!trabajoParaActa) return;
+    await generarActaMutation.mutateAsync({
+      id: trabajoParaActa.Id_TrabajoR,
+      tomo: payload.tomo,
+      numeroFolio: payload.numeroFolio,
+      folio: payload.folio,
     });
   };
 
@@ -382,17 +590,29 @@ export const useMaestroLandingController = () => {
 
   // Mutación para finalizar trabajo recepcional
   const finalizarMutation = useMutation({
-    mutationFn: ({ id, folio, resultado }: { id: number; folio: string; resultado: string }) =>
+    mutationFn: ({
+      id,
+      tomo,
+      numeroFolio,
+      folio,
+      resultado,
+    }: {
+      id: number;
+      tomo?: number | null;
+      numeroFolio?: number | null;
+      folio: string;
+      resultado: string;
+    }) =>
       trabajoService.finalizarTrabajo(id, {
+        Tomo: tomo,
+        Numero_Folio: numeroFolio,
         Folio: folio,
         Resultado: resultado,
         Numero_Personal: user?.numeroPersonal,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['trabajos'] });
-      toast.success('Trabajo recepcional finalizado con éxito', {
-        description: 'Se ha asignado el folio de acta y el resultado. El estado ha cambiado a "Finalizado".',
-      });
+      toast.success('Trabajo finalizado exitosamente');
       setIsFinalizarModalOpen(false);
       setTrabajoParaFinalizar(null);
     },
@@ -403,14 +623,31 @@ export const useMaestroLandingController = () => {
     },
   });
 
-  const handleFinalizarSubmit = async (folio: string, resultado: string) => {
+  const handleFinalizarSubmit = async (payload: {
+    tomo?: string | number | null;
+    numeroFolio?: string | number | null;
+    folio: string;
+    resultado: string;
+  }) => {
     if (!trabajoParaFinalizar) return;
+    const tNum =
+      payload.tomo !== undefined && payload.tomo !== null && payload.tomo !== ''
+        ? Number(payload.tomo)
+        : null;
+    const fNum =
+      payload.numeroFolio !== undefined && payload.numeroFolio !== null && payload.numeroFolio !== ''
+        ? Number(payload.numeroFolio)
+        : null;
+
     await finalizarMutation.mutateAsync({
       id: trabajoParaFinalizar.Id_TrabajoR,
-      folio,
-      resultado,
+      tomo: tNum !== null && !isNaN(tNum) ? tNum : null,
+      numeroFolio: fNum !== null && !isNaN(fNum) ? fNum : null,
+      folio: payload.folio,
+      resultado: payload.resultado,
     });
   };
+
 
   const handleRegistrar = () => {
     setTrabajoToEdit(null);
@@ -430,7 +667,41 @@ export const useMaestroLandingController = () => {
     }
   };
 
+  const subtituloVista = useMemo(() => {
+    if (isDirectorUser) {
+      return 'Dirección de la Facultad — Supervisión General de Trabajos Recepcionales';
+    }
+    if (isJefeCarreraUser) {
+      return jefeCarreraNombre
+        ? `Licenciatura en ${jefeCarreraNombre} — Supervisión Académica`
+        : 'Jefatura de Carrera — Supervisión Académica';
+    }
+    if (isSecretariaUser) {
+      return 'Secretaría Académica — Control Documental y Actas';
+    }
+    if (isSecretariaGrupoUser) {
+      return 'Secretaría de Grupo — Control Documental y Actas';
+    }
+    if (isDocenteUser) {
+      if (todosMisGrupos.length > 0) {
+        const nrcs = todosMisGrupos.map((g) => g.curso?.NRC).filter(Boolean).join(', ');
+        return `Experiencia Recepcional — Grupo(s) a cargo: NRC ${nrcs}`;
+      }
+      return 'Experiencia Recepcional — Sin grupos asignados en el periodo actual';
+    }
+    return 'Experiencia Recepcional';
+  }, [
+    isDirectorUser,
+    isJefeCarreraUser,
+    jefeCarreraNombre,
+    isSecretariaUser,
+    isSecretariaGrupoUser,
+    isDocenteUser,
+    todosMisGrupos,
+  ]);
+
   return {
+    subtituloVista,
     trabajos: filteredAndSortedTrabajos,
     rawTrabajos: trabajos,
     totalCount: filteredAndSortedTrabajos.length,
@@ -467,6 +738,11 @@ export const useMaestroLandingController = () => {
     trabajoToEdit,
     handleCloseModal,
     handleSaveTrabajo,
+    // Generar Acta Modal states
+    isGenerarActaModalOpen,
+    trabajoParaActa,
+    handleCerrarGenerarActa,
+    handleGenerarActaSubmit,
     // Finalizar Modal states
     isFinalizarModalOpen,
     trabajoParaFinalizar,
@@ -477,7 +753,42 @@ export const useMaestroLandingController = () => {
     confirmDialog,
     handleCloseConfirmDialog,
     userIsDirectivo,
+    isDirectorUser,
+    isSecretariaUser,
     isSecretariaGrupoUser,
+    isJefeCarreraUser,
+    jefeCarreraId,
+    jefeCarreraNombre,
     userNumeroPersonal: user?.numeroPersonal,
+    tieneGruposERActivos,
+    userCanRegistrar,
+    userCanRecibirDocumentos,
+    userCanGenerarActa,
+    userCanFinalizarTrabajo,
+    userCanValidarTrabajo,
+    canEditarTrabajo: (estado?: string, trabajo?: TrabajoRecepcional | null) => {
+      const userNum = String(user?.numeroPersonal ?? '').trim();
+      const esPropio = !!(
+        userNum &&
+        trabajo &&
+        (trabajo.academicos || trabajo.ParticipantesTrabajos || []).some((p: any) => {
+          const num = String(p.Academico?.Numero_Personal ?? p.Numero_Personal ?? '').trim();
+          return num === userNum;
+        })
+      );
+      return canEditarTrabajo(user, estado, esPropio);
+    },
+    canEliminarTrabajo: (estado?: string, trabajo?: TrabajoRecepcional | null) => {
+      const userNum = String(user?.numeroPersonal ?? '').trim();
+      const esPropio = !!(
+        userNum &&
+        trabajo &&
+        (trabajo.academicos || trabajo.ParticipantesTrabajos || []).some((p: any) => {
+          const num = String(p.Academico?.Numero_Personal ?? p.Numero_Personal ?? '').trim();
+          return num === userNum;
+        })
+      );
+      return canEliminarTrabajo(user, estado, esPropio);
+    },
   };
 };
